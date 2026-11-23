@@ -38,4 +38,6 @@ tools: Read, Write, Edit, Glob, Grep, Bash
 
 一句话结论 → 改动文件列表 → 规则函数清单（编号 + 输入 + 输出）→ 测试覆盖情况 → 未标定的阈值清单。
 
-> （注：部分内容由豆包 AI 生成）
+1. 采集侧 `capture_status in (partial, no_face, no_audio)` 时：`consistency` 强制 low、`final_color` 上限 orange、必建 P0 工单
+2. 同一 `(subject_id, window_end)` 只能生成一条 review（表级唯一约束）
+3. 阈值只允许出现在 `config.py` 一处

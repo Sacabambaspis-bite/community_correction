@@ -43,4 +43,4 @@ tools: Read, Write, Edit, Glob, Grep, Bash
 
 一句话结论 → 改动文件列表 → Provider 清单（哪个是真模型、哪个是 mock）→ 一条可跑的端到端验证命令。
 
-> （注：部分内容由豆包 AI 生成）
+仅有一路模态可用（`coverage` 为 `face_only` 或 `audio_only`）时，`consistency` 强制为 `low`，`needs_review = true`，不得判为 `medium`。输出需带 `analysis_status`（done / degraded / failed）。
