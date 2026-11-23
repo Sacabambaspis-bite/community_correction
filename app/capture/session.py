@@ -121,9 +121,18 @@ def _add_issue(state: _State, code: str, detail=None) -> None:
 
 
 def _frame_error_code(reason: Optional[str]) -> str:
-    if reason in _FRAME_ERROR_CODES:
-        return reason
+    # camera 侧以 "code: detail" 形式带回诊断信息，code 仍是稳定枚举
+    code = str(reason or "").split(":", 1)[0].strip()
+    if code in _FRAME_ERROR_CODES:
+        return code
     return "invalid_frame"
+
+
+def _frame_error_detail(reason: Optional[str]) -> Optional[str]:
+    text = str(reason or "")
+    _, separator, detail = text.partition(":")
+    detail = detail.strip()
+    return detail if separator and detail else None
 
 
 def _audio_error_code(reason: Optional[str]) -> str:
@@ -226,7 +235,11 @@ def _apply_state(meta: dict, state: _State):
     meta["face"] = state.face_meta if state.face_written else None
     meta["warnings"] = _warning_entries(state, warning_codes)
     meta["error"] = (
-        {"code": error_code, "reason": _reason(error_code), "detail": None}
+        {
+            "code": error_code,
+            "reason": _reason(error_code),
+            "detail": state.details.get(error_code),
+        }
         if error_code
         else None
     )
@@ -380,7 +393,11 @@ def _run(
 
     if frame_result.status != "ok" or frame_result.frame is None:
         # 摄像头 / 帧故障属于零产物的设备级故障，直接收敛为 error，不再录音
-        _add_issue(state, _frame_error_code(frame_result.reason))
+        _add_issue(
+            state,
+            _frame_error_code(frame_result.reason),
+            detail=_frame_error_detail(frame_result.reason),
+        )
         return _finalize(meta, state, session_dir)
 
     resolution_value = frame_result.resolution

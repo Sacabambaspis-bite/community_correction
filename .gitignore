@@ -15,6 +15,7 @@ htmlcov/
 # ========== 本地采集数据（人脸/音频/心理数据，绝不入库）==========
 storage/*
 !storage/.gitkeep
+hw_check_*
 *.db
 *.sqlite
 *.sqlite3
