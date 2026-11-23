@@ -153,7 +153,7 @@ step4  if degraded == true:      needs_review = true，并计入 R_DEGRADED_REVI
 | 5 | `consistency == "low"`（无论最终色） | 是，且强制 `manual_review=1` | `P0` | 24 小时内 |
 | 6 | `degraded == true` 且最终色为绿（`R_DEGRADED_REVIEW`） | 是（补采 / 复核单） | `P1` | 72 小时内 |
 | 7 | `final_color == "green"` 且无上述情况 | **否** | — | — |
-| 8 | `capture_status in (partial, no_face, no_audio)`（技术性降级或单模态） | 是，且强制 `manual_review=1` | `P0`（同规则 5） | 24 小时内 |
+| 8 | `capture_status in (partial, no_face, no_audio)`（技术性降级或单模态）：`consistency` 强制 `low`、`final_color` 上限 `orange`、必建 `P0` 工单 | 是，且强制 `manual_review=1` | `P0` | 24 小时内 |
 | 8a | `capture_status in (no_face_no_audio, error)`（无任何可用产物） | **否** | — | 由前端提示重采，不进分析队列 |
 | 9 | 窗口无可用会话 | **否** | — | 返回 `no_session_in_window` |
 | 10 | `R_BASELINE_INSUFFICIENT` 单独命中 | 随蓝一起建单 | `P2` | 7 天内 |

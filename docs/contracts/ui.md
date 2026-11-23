@@ -79,8 +79,8 @@
 | `capture_status` | 文案 | 操作 |
 |---|---|---|
 | `partial` | 本次数据不完整，已转人工复核 | 查看结果 |
-| `no_face` | 没有识别到面部，请正对摄像头再试一次 | 重试 |
-| `no_audio` | 没有采集到有效的声音，请靠近麦克风再试一次 | 重试 |
+| `no_face` | 本次数据不完整，已转人工复核 | 重试 |
+| `no_audio` | 本次数据不完整，已转人工复核 | 重试 |
 | `no_face_no_audio` | 本次采集未成功，请重试或联系工作人员 | 重试 / 联系 |
 | `error` | 设备暂时不可用，请联系工作人员 | 联系 |
 
@@ -236,7 +236,7 @@ type ColorBadgeProps = {
 | `code=1005` | 按 `message` 映射具体提示（如 `consent_required`） |
 | `code=1006` | 提示稍后再试，倒计时禁用按钮 |
 | `code=2001` | `sessions.status=failed`，按 `capture_status`（`no_face_no_audio` / `error`）展示第 3.2 节映射文案 |
-| `code=0` 且 `degraded=true` | 按 `capture_status`（`partial`）展示第 3.2 节文案，结果页可用 |
+| `code=0` 且 `degraded=true` | 按 `capture_status`（`partial` / `no_face` / `no_audio`）展示第 3.2 节文案，结果页可用 |
 | `code=2002` | 展示"部分分析未完成"的提示，但结论可用 |
 | `code=5000` | 通用失败提示 + 重试按钮，禁止展示堆栈 |
 
