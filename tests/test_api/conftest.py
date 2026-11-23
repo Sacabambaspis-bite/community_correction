@@ -9,7 +9,7 @@ if str(_ROOT) not in sys.path:
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from app.api import deps
@@ -18,10 +18,27 @@ from app.api.main import app
 from app.db.database import Base
 
 
+def _enable_sqlite_foreign_keys(engine) -> None:
+    """测试库与生产引擎一致：每条连接打开外键约束。"""
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+
+@pytest.fixture(autouse=True)
+def _fake_capture(monkeypatch):
+    """默认走假采集，避免测试触达真实摄像头。"""
+    monkeypatch.setenv("CAPTURE_FAKE", "1")
+
+
 @pytest.fixture()
 def db_factory(tmp_path):
     """每个测试一个临时库，避免触碰到 storage/app.db。"""
     engine = create_engine(f"sqlite:///{(tmp_path / 'test.db').as_posix()}")
+    _enable_sqlite_foreign_keys(engine)
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     try:

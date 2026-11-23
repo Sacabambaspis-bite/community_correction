@@ -7,6 +7,9 @@
 from __future__ import annotations
 
 import logging
+import os
+import sys
+import traceback
 from contextvars import ContextVar
 from typing import Any, Optional
 
@@ -65,13 +68,6 @@ def envelope(
     }
 
 
-def _safe_exc_summary(exc: Exception) -> str:
-    """异常摘要：避免把文件路径等敏感信息写进日志。"""
-    if isinstance(exc, OSError):
-        return ""
-    return " ".join(str(exc).split())[:120]
-
-
 async def _biz_error_handler(request: Request, exc: BizError) -> JSONResponse:
     return JSONResponse(
         status_code=200,
@@ -106,12 +102,15 @@ async def _unhandled_error_handler(request: Request, exc: Exception) -> JSONResp
     # 未捕获异常由 Starlette ServerErrorMiddleware 在外层处理，
     # 此时中间件的 contextvar 已 reset，只能从 request.state 取 request_id。
     rid = getattr(request.state, "request_id", "")
+    # 只记录异常类型与请求路径（不含 query），禁止输出异常消息原文与堆栈。
     logger.error(
-        "api.unhandled_exception request_id=%s type=%s msg=%s",
+        "api.unhandled_exception request_id=%s exception_type=%s endpoint=%s",
         rid,
         type(exc).__name__,
-        _safe_exc_summary(exc),
+        request.url.path,
     )
+    if os.environ.get("DEBUG") == "1":
+        traceback.print_exc(file=sys.stdout)
     return JSONResponse(
         status_code=500,
         headers={"X-Request-Id": rid},

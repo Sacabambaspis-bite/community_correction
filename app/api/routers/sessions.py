@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import uuid
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy.orm import Session
 
+from app.api import deps
 from app.api.deps import get_db, require_admin, require_any_subject_or_staff
 from app.api.errors import (
     ANALYSIS_FAILED,
@@ -29,7 +32,6 @@ from app.api.schemas import (
     degraded_flags,
 )
 from app.capture.config import STORAGE_ROOT
-from app.db.database import SessionLocal
 from app.db.models import CaptureSession, Subject
 
 logger = logging.getLogger("app.api")
@@ -60,6 +62,38 @@ def _load_json_list(raw: Optional[str]) -> list[str]:
     return value if isinstance(value, list) else []
 
 
+def _capture_result(
+    *,
+    subject_id: str,
+    session_id: str,
+    device_index: int,
+    duration_sec: float,
+):
+    """采集入口：`CAPTURE_FAKE=1` 时返回假结果，测试不触达真实摄像头。"""
+    if os.environ.get("CAPTURE_FAKE") == "1":
+        base = f"subjects/{subject_id}/sessions/{session_id}"
+        return SimpleNamespace(
+            capture_status="ok",
+            face_path=f"{base}/face.jpg",
+            audio_path=f"{base}/audio.wav",
+            codes=[],
+            meta={
+                "finished_at": _now(),
+                "audio": {"duration_sec": duration_sec},
+            },
+        )
+
+    from app.capture.session import run_capture_session
+
+    return run_capture_session(
+        subject_id=subject_id,
+        session_id=session_id,
+        storage_root=STORAGE_ROOT,
+        device_index=device_index,
+        duration_sec=duration_sec,
+    )
+
+
 def _run_capture_and_persist(
     *,
     session_id: str,
@@ -71,14 +105,12 @@ def _run_capture_and_persist(
 
     必须保持同步 `def`：FastAPI 会把它放到线程池执行，`threading.Lock` 才能生效。
     """
-    from app.capture.session import run_capture_session
-
-    db = SessionLocal()
+    factory = deps.get_session_factory()
+    db = factory()
     try:
-        result = run_capture_session(
+        result = _capture_result(
             subject_id=subject_id,
             session_id=session_id,
-            storage_root=STORAGE_ROOT,
             device_index=device_index,
             duration_sec=duration_sec,
         )

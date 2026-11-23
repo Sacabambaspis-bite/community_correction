@@ -6,25 +6,11 @@
 
 from __future__ import annotations
 
-import pytest
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import select
 
-from app.db.database import Base
 from app.db.models import AuditLog, CaptureSession, Subject
 
 _NOW = "2026-11-23T10:00:00+08:00"
-
-
-@pytest.fixture()
-def db_factory():
-    engine = create_engine("sqlite://")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
-    try:
-        yield factory
-    finally:
-        engine.dispose()
 
 
 def test_subject_allows_null_json_columns(db_factory):
@@ -59,6 +45,8 @@ def test_session_allows_null_analysis_json_and_defaults_codes(db_factory):
                 updated_at=_NOW,
             )
         )
+        # 2.1.9 下父子表同一次 flush 顺序不可靠：父表先显式 flush。
+        db.flush()
         db.add(
             CaptureSession(
                 id="session-1",

@@ -43,6 +43,11 @@ ROLE_SUBJECT = "subject"
 ROLE_STAFF = "staff"
 
 
+def get_session_factory():
+    """返回数据库会话工厂；后台任务经此获取会话，测试可 monkeypatch 覆盖。"""
+    return SessionLocal
+
+
 def get_db() -> Iterator[Session]:
     """请求级数据库会话：异常回滚，结束必关闭；提交由路由自行负责。"""
     db = SessionLocal()

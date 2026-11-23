@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+import app.api.deps as deps_module
 import app.api.routers.admin as admin_router
+import app.api.routers.sessions as sessions_router
 from app.api.main import app
 from app.db.models import AuditLog, CaptureSession, Subject
 
@@ -268,3 +271,76 @@ def test_unhandled_exception_returns_500_with_request_id(client):
     assert body["request_id"]
     assert str(uuid.UUID(body["request_id"])) == body["request_id"]
     assert body["request_id"] == response.headers["X-Request-Id"]
+
+
+def test_create_session_fake_capture_success(
+    client, db_factory, user_headers, monkeypatch
+):
+    monkeypatch.setattr(deps_module, "get_session_factory", lambda: db_factory)
+    _add_subject(db_factory)
+
+    created = client.post(
+        "/api/sessions", json={"subject_id": _SUBJECT_ID}, headers=user_headers
+    )
+    body = created.json()
+    assert body["code"] == 0
+    assert body["data"]["status"] == "created"
+    session_id = body["data"]["session_id"]
+
+    detail = client.get(f"/api/sessions/{session_id}", headers=user_headers)
+    payload = detail.json()
+    assert payload["code"] == 0
+    assert payload["degraded"] == []
+    assert payload["data"]["status"] == "captured"
+    assert payload["data"]["capture_status"] == "ok"
+    assert payload["data"]["analysis_status"] == "pending"
+    assert payload["data"]["codes"] == []
+    assert payload["data"]["coverage"] == "both"
+    assert payload["data"]["face_available"] is True
+    assert payload["data"]["audio_available"] is True
+
+
+def test_capture_failure_persists_and_does_not_leak_path(
+    client, db_factory, user_headers, monkeypatch, caplog
+):
+    monkeypatch.setattr(deps_module, "get_session_factory", lambda: db_factory)
+
+    def boom(**_kwargs):
+        raise RuntimeError("failed reading D:/secret/audio.wav")
+
+    monkeypatch.setattr(sessions_router, "_capture_result", boom)
+    _add_subject(db_factory)
+    caplog.set_level(logging.INFO, logger="app.api")
+
+    created = client.post(
+        "/api/sessions", json={"subject_id": _SUBJECT_ID}, headers=user_headers
+    )
+    session_id = created.json()["data"]["session_id"]
+
+    payload = client.get(
+        f"/api/sessions/{session_id}", headers=user_headers
+    ).json()
+    assert payload["code"] == 2001
+    assert payload["data"]["status"] == "failed"
+    assert payload["data"]["capture_status"] == "error"
+    assert payload["data"]["codes"] == ["unknown"]
+    assert "D:/secret" not in caplog.text
+
+
+def test_create_session_returns_capture_busy_when_lock_held(
+    client, db_factory, user_headers
+):
+    _add_subject(db_factory)
+    acquired = sessions_router._CAPTURE_LOCK.acquire(blocking=False)
+    assert acquired
+    try:
+        response = client.post(
+            "/api/sessions", json={"subject_id": _SUBJECT_ID}, headers=user_headers
+        )
+    finally:
+        sessions_router._CAPTURE_LOCK.release()
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["code"] == 5000
+    assert body["message"] == "capture_busy"

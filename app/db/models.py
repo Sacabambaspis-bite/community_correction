@@ -161,7 +161,9 @@ class Review(Base):
     )
     window_start: Mapped[str] = mapped_column(Text, nullable=False)
     window_end: Mapped[str] = mapped_column(Text, nullable=False)
-    window_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    window_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="7"
+    )
     single_session_risk: Mapped[str] = mapped_column(Text, nullable=False)
     trend_color: Mapped[str] = mapped_column(Text, nullable=False)
     final_color: Mapped[str] = mapped_column(Text, nullable=False)
