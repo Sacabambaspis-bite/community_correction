@@ -2,12 +2,12 @@
 
 | 项 | 值 |
 |---|---|
-| 契约版本 | `db@1.3` |
+| 契约版本 | `db@1.4` |
 | 所有者 | backend-engineer（`app/db/`） |
 | 引擎 | SQLite + SQLAlchemy 2.x（原型阶段手工迁移，正式部署前引入 Alembic） |
 | 关联 | [capture.md](./capture.md)、[api.md](./api.md)、[analysis.schema.json](./analysis.schema.json) |
 
-> v1.3 已冻结，后续仅接受实现驱动的变更。
+> v1.4 已冻结，后续仅接受实现驱动的变更。
 
 ---
 
@@ -18,7 +18,7 @@
 | 主键 | 业务表用 UUID v4 字符串（`TEXT`，36 字符）；`audit_logs` 用自增整数 |
 | 时间 | `TEXT`，ISO 8601 带时区（`2026-11-23T10:12:03+08:00`），UTC 存储可选但同一库内必须统一 |
 | 布尔 | `INTEGER`，`0/1` |
-| JSON | `TEXT` + `CHECK (json_valid(col))` |
+| JSON | `TEXT` + `CHECK (json_valid(col))`；可空 JSON 列（表达「缺失」）用 `CHECK (col IS NULL OR json_valid(col))` |
 | 枚举 | `TEXT` + `CHECK (col IN (...))`，不用 SQLite 原生枚举 |
 | 删除 | 不做物理删除业务数据；对象停用改 `status` |
 | 路径 | 只存相对路径，以 `STORAGE_ROOT` 为根 |
@@ -88,7 +88,7 @@
 | `captured_at` | TEXT | NULL | 采集完成时间 |
 | `analysis_status` | TEXT | NOT NULL, DEFAULT `'pending'`, CHECK in (`pending`,`done`,`degraded`,`failed`) | 分析失败只改此字段，不回写 `status` |
 | `analysis_json` | TEXT | NULL, JSON | 通过 schema 校验的完整 `AnalysisResult` |
-| `codes` | TEXT | NULL, JSON | 结构化 code 数组：`error.code` 在前，其余来自 `warnings[].code`；不含堆栈 |
+| `codes` | TEXT | NOT NULL, DEFAULT `'[]'`, JSON | 结构化 code 数组：`error.code` 在前，其余来自 `warnings[].code`；无异常时为空数组；不含堆栈 |
 | `created_at` | TEXT | NOT NULL | |
 | `updated_at` | TEXT | NOT NULL | |
 

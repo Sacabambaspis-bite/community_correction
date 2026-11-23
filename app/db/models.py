@@ -1,8 +1,8 @@
 """ORM 模型。
 
-字段、约束与索引与 `docs/contracts/db.md`（db@1.3）第 2-8 节逐字对齐：
+字段、约束与索引与 `docs/contracts/db.md`（db@1.4）第 2-8 节逐字对齐：
 业务主键为 TEXT（UUID v4 字符串），时间为 TEXT（ISO 8601 字符串），
-布尔为 INTEGER 0/1，JSON 列为 TEXT + `CHECK (json_valid(col))`。
+布尔为 INTEGER 0/1，JSON 列为 TEXT + `json_valid` CHECK，可空列允许 NULL。
 
 注意：只有契约中明确标注 `CHECK in (...)` 的列才加枚举 CHECK。
 """
@@ -55,8 +55,14 @@ class Subject(Base):
             "status IN ('active','suspended','closed')",
             name="ck_subjects_status",
         ),
-        CheckConstraint("json_valid(consent_json)", name="ck_subjects_consent_json"),
-        CheckConstraint("json_valid(baseline_json)", name="ck_subjects_baseline_json"),
+        CheckConstraint(
+            "consent_json IS NULL OR json_valid(consent_json)",
+            name="ck_subjects_consent_json",
+        ),
+        CheckConstraint(
+            "baseline_json IS NULL OR json_valid(baseline_json)",
+            name="ck_subjects_baseline_json",
+        ),
         Index("ix_subjects_status", "status"),
     )
 
@@ -86,7 +92,8 @@ class CaptureSession(Base):
         Text, nullable=False, default="pending", server_default="pending"
     )
     analysis_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    codes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # db@1.4：状态类列，NOT NULL DEFAULT '[]'。
+    codes: Mapped[str] = mapped_column(Text, nullable=False, server_default="[]")
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -104,7 +111,10 @@ class CaptureSession(Base):
             "analysis_status IN ('pending','done','degraded','failed')",
             name="ck_sessions_analysis_status",
         ),
-        CheckConstraint("json_valid(analysis_json)", name="ck_sessions_analysis_json"),
+        CheckConstraint(
+            "analysis_json IS NULL OR json_valid(analysis_json)",
+            name="ck_sessions_analysis_json",
+        ),
         CheckConstraint("json_valid(codes)", name="ck_sessions_codes"),
         Index(
             "ix_sessions_subject_captured_at",
@@ -269,7 +279,10 @@ class AuditLog(Base):
             "actor_type IN ('subject','staff','system')",
             name="ck_audit_logs_actor_type",
         ),
-        CheckConstraint("json_valid(detail_json)", name="ck_audit_logs_detail_json"),
+        CheckConstraint(
+            "detail_json IS NULL OR json_valid(detail_json)",
+            name="ck_audit_logs_detail_json",
+        ),
         Index(
             "ix_audit_logs_target",
             "target_type",

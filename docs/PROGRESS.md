@@ -39,7 +39,7 @@
 7a6f0cf  baseline: contracts v1.1 + app/capture                                              [contracts-v1.1]
 ```
 
-**尚未实现的模块**：`app/analysis/`、`app/grading/`、`app/api/`、`app/db/`、`web/`。仓库中目前只有 `app/capture/` 一个业务包。
+**尚未实现的模块**：`app/analysis/`、`app/grading/`、`web/`。`app/capture/` 已封存；`app/db/` 已实现（`db-v1`，契约已升 db@1.4）；`app/api/` 骨架已实现（延期项见 §4）。
 
 采集模块已落地的契约要点：
 
@@ -69,9 +69,15 @@
 |---|---|---|
 | `app/analysis/` | 四路管线（ASR / 语音情感 / 表情 / 心理文本）、Provider 抽象、一致性判定 | 未开始 |
 | `app/grading/` | 五色规则、七日趋势偏移、合成封顶、工单草案 | 未开始 |
-| `app/db/` | 5 张表（`subjects` / `sessions` / `reviews` / `review_tickets` / `audit_logs`）+ 迁移 | 未开始 |
-| `app/api/` | FastAPI 路由、鉴权、统一响应包、错误码 | 未开始 |
+| `app/db/` | 5 张表（`subjects` / `sessions` / `reviews` / `review_tickets` / `audit_logs`）+ 迁移 | 已实现（`db-v1`，db@1.4） |
+| `app/api/` | FastAPI 路由、鉴权、统一响应包、错误码 | 骨架已实现（延期项见下） |
 | `web/` | 用户端 3 页 + 管理端 4 页 | 未开始 |
+
+**API 骨架延期项（前端开工前必须补齐）**
+
+- `/api/user/*` 全部端点：consent 查询 / 提交 / 撤回、`feedback`；
+- `POST /api/sessions` 的 consent 前置校验（`1005 consent_required` / `consent_revoked`）；
+- `subject` token 的会话归属校验（只能访问本人 session，越权返回 `1003`）。
 
 **阻塞 / 风险**
 
@@ -128,4 +134,5 @@ python scripts\verify_capture.py --device 0 --seconds 5 --out storage/_debug   #
 - `architecture.md` 存储路径是否按 capture@1.2 修订；
 - README 中“4 张表”是否改为 5 张；
 - `scripts/` 的目录归属；
+- `capture_busy` 暂复用 `code=5000`（`message=capture_busy`），待 api@1.5 增补专用错误码；
 - 正式验证用的 `subject_id` 目前是固定 UUID（`3b1e7c90-...`），是否保留为演示对象。

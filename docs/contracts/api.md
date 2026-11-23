@@ -2,12 +2,12 @@
 
 | 项 | 值 |
 |---|---|
-| 契约版本 | `api@1.3` |
+| 契约版本 | `api@1.4` |
 | 所有者 | backend-engineer（`app/api/`） |
 | 基础路径 | `/api` |
 | 关联 | [db.md](./db.md)、[capture.md](./capture.md)、[analysis.schema.json](./analysis.schema.json)、[ui.md](./ui.md) |
 
-> v1.3 已冻结，后续仅接受实现驱动的变更。
+> v1.4 已冻结，后续仅接受实现驱动的变更。本版将信封改为 `{code, message, data, degraded, request_id}`（业务码 HTTP 200、未捕获异常 HTTP 500），并统一路由为 `/api/sessions` + `/api/admin/*` + `/api/user/*`。
 
 ---
 
@@ -19,19 +19,20 @@
 | 字段命名 | `snake_case`，与数据库一致 |
 | 时间 | ISO 8601 带时区 |
 | 分页 | query 参数 `page`（从 1 开始）、`page_size`（默认 20，最大 100） |
-| 幂等 | `POST /api/session/{id}/analyze` 重复调用返回首次结果 |
+| 幂等 | `POST /api/sessions/{id}/analyze` 重复调用返回首次结果 |
 | 路径参数 | `{session_id}`、`{subject_id}`、`{ticket_id}`、`{review_id}` 均为 UUID 字符串 |
 
 ## 2. 统一响应包
 
-所有接口（含错误）返回同一结构：
+所有 JSON 接口（含错误）返回同一结构：
 
 ```json
 {
   "code": 0,
   "message": "ok",
   "data": {},
-  "request_id": "req_01HF8Z3K9Q"
+  "degraded": [],
+  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
 }
 ```
 
@@ -39,30 +40,49 @@
 |---|---|---|
 | `code` | int | `0` 成功，非 0 见第 3 节 |
 | `message` | string | 机器可读短句，不包含个人信息 |
-| `data` | object \| array \| null | 业务数据；错误时为 `null` |
-| `request_id` | string | 用于日志关联 |
+| `data` | object \| array \| null | 业务数据；错误时为 `null`（会话查询失败态例外，见 7.3） |
+| `degraded` | string[] | 降级标记，见 2.1 |
+| `request_id` | string | 中间件为每个请求生成的 uuid4；同时写入响应头 `X-Request-Id`、服务日志与 `audit_logs.request_id` |
 
-HTTP 状态码与 `code` 同时使用：业务错误返回 4xx 但 **`code` 才是判定依据**；未捕获异常统一 500 + `code=5000`。
+- 每个请求由中间件生成新的 uuid4，响应头 `X-Request-Id` 与信封 `request_id` 必须同值；
+- `request_id` 只用于日志关联，不包含任何个人信息。
 
-**唯一例外**：`GET /api/session/{session_id}/face` 成功时直接返回 `image/jpeg` 二进制（不走信封）；鉴权失败、留痕失败等错误情况仍返回上述 JSON 信封。
+**HTTP 语义**：所有可预期的业务错误（`1001` / `1002` / `1003` / `1004` / `1005` / `1006` / `2001` / `2003` / `4000`，以及业务占位用的 `5000`，如 `capture_busy`、`analysis_pipeline_not_ready`）一律返回 HTTP 200；只有**未捕获异常**返回 HTTP 500 + `code=5000`。
+
+**唯一例外**：`GET /api/admin/sessions/{session_id}/face` 成功时直接返回 `image/jpeg` 二进制（不走信封）；鉴权失败、留痕失败、文件缺失等错误情况仍返回上述 JSON 信封。
+
+### 2.1 `degraded` 取值
+
+| 值 | 含义 |
+|---|---|
+| `[]` | 未降级 |
+| `["capture"]` | 采集降级（`capture_status in (partial, no_face, no_audio)`） |
+| `["analysis"]` | 分析降级（`analysis_status=degraded`，结果可用） |
+| `["capture","analysis"]` | 两者同时降级 |
+
+- 数组元素去重，固定顺序 `capture` → `analysis`；
+- 与具体会话无关的接口（health、列表等）固定返回 `[]`；
+- `analysis_status=failed` 不属于降级：返回 `2003`。
 
 ## 3. 错误码
 
-| code | HTTP | 含义 | 典型场景 |
-|---|---|---|---|
-| 0 | 200 | 成功 | — |
-| 1001 | 400 | 参数错误 | 缺字段、类型不符、枚举越界 |
-| 1002 | 401 | 未认证 | 缺 token 或 token 无效 |
-| 1003 | 403 | 无权限 | 用户端 token 访问管理端接口 |
-| 1004 | 404 | 资源不存在 | session / ticket 不存在 |
-| 1005 | 409 | 状态冲突 | 未同意就采集、未采集就分析、工单已关闭 |
-| 1006 | 429 | 频率限制 | 同一对象 60 秒内重复建会话 |
-| 2001 | 200 | 采集失败（无可用产物） | `sessions.status == failed`，业务仍返回 200 |
-| 2003 | 200 | 分析失败（结果不可用） | `analysis_status=failed`，需重采或人工处理 |
-| 5000 | 500 | 内部错误 | 未捕获异常，`data=null` |
+| code | 含义 | 典型场景 |
+|---|---|---|
+| 0 | 成功 | — |
+| 1001 | 参数错误 | 缺字段、类型不符、枚举越界 |
+| 1002 | 未认证 | 缺 token 或 token 无效 |
+| 1003 | 无权限 | 用户端 token 访问管理端接口 |
+| 1004 | 资源不存在 | session / subject / 面部图文件不存在 |
+| 1005 | 状态冲突 | 未同意就采集、工单已关闭 |
+| 1006 | 频率限制 | 同一对象 60 秒内重复建会话 |
+| 2001 | 采集失败（无可用产物） | `sessions.status == failed`；`failed` 会话调用分析 |
+| 2003 | 分析失败（结果不可用） | `analysis_status=failed`，需重采或人工处理 |
+| 4000 | 会话未采集完成 | `sessions.status == created` 时调用分析 |
+| 5000 | 内部错误 / 临时占位 | 未捕获异常；分析管线未就绪（`message=analysis_pipeline_not_ready`）；采集并发冲突（`message=capture_busy`，专用错误码待增补） |
 
+> 业务错误均返回 HTTP 200，业务结果以 `code` 为准；未捕获异常返回 HTTP 500 + `code=5000`。
 > `2001` / `2003` 不视为 HTTP 错误，前端依据 `code` 决定展示哪种提示。
-> `partial` / `no_face` / `no_audio` 返回 `code=0` 且 `degraded` 数组含 `"capture"`；只有 `sessions.status == failed` 才返回 `2001`。
+> `partial` / `no_face` / `no_audio` 返回 `code=0` 且 `degraded` 含 `"capture"`；只有 `sessions.status == failed` 才返回 `2001`。
 
 ## 4. 鉴权
 
@@ -70,69 +90,85 @@ HTTP 状态码与 `code` 同时使用：业务错误返回 4xx 但 **`code` 才�
 Authorization: Bearer <token>
 ```
 
-| 角色 | token 前缀 | 说明 |
-|---|---|---|
-| `subject` | `user_` | 用户端，仅能访问 `/api/me/*` 与本人 `session` |
-| `staff` | `admin_` | 管理端，可访问全部 `/api/*` |
+| 角色 | token 来源 | 缺省值（仅本地开发） | 说明 |
+|---|---|---|---|
+| `subject` | `USER_TOKEN` | `user_demo` | 用户端，仅能访问 `/api/user/*` 与本人会话 |
+| `staff` | `ADMIN_TOKEN` | `admin_demo` | 管理端，可访问 `/api/admin/*` 与共享会话接口 |
 
 规则：
 
-- 用户端接口访问**他人** `subject_id` 返回 `1003`；
-- 管理端接口一律要求 `role=staff`；
-- 原型为静态令牌，值从 `AUTH_USER_TOKEN` / `AUTH_ADMIN_TOKEN` 读取；
-- 缺失或格式错误返回 `1002`。
+- `/api/admin/*` 一律要求 `staff`；
+- `POST /api/sessions/{id}/analyze` 要求 `staff`；
+- `POST /api/sessions`、`GET /api/sessions/{id}` 接受 `subject` 或 `staff`；
+- `GET /api/health` 无需鉴权；
+- 令牌为静态值直接比较，不要求前缀；缺失或格式错误返回 `1002`，角色不符返回 `1003`；
+- 非生产环境未设置环境变量时使用缺省 demo 值并在启动日志打 `WARNING`；
+- `APP_ENV=production` 时，`USER_TOKEN` / `ADMIN_TOKEN` 未配置或仍等于 `user_demo` / `admin_demo`，启动直接抛 `RuntimeError`，不提供默认值。
 
 ## 5. 端点清单
 
-### 5.1 用户端（`subject`）
+标注「未实现」的端点仅为规划，本轮不落地。所有 `/api/admin/*` 需 `staff`。
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| `GET` | `/api/me/consent` | 查询本人同意状态 |
-| `PUT` | `/api/me/consent` | 提交同意（人脸、音频独立勾选） |
-| `POST` | `/api/me/consent/revoke` | 撤回同意 |
-| `POST` | `/api/session` | 发起一次采集 |
-| `GET` | `/api/session/{session_id}` | 查询本人会话状态 |
-| `GET` | `/api/session/{session_id}/feedback` | 获取中性结果反馈（不含色码） |
+### 5.1 公共
 
-### 5.2 管理端（`staff`）
+| 方法 | 路径 | 状态 | 说明 |
+|---|---|---|---|
+| `GET` | `/api/health` | 已实现 | 健康检查，免鉴权 |
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| `GET` | `/api/subjects` | 对象列表（分页、关键词、状态） |
-| `POST` | `/api/subjects` | 新建对象 |
-| `GET` | `/api/subjects/{subject_id}` | 对象详情（含当前色码与证据摘要） |
-| `PATCH` | `/api/subjects/{subject_id}` | 更新对象基础信息 |
-| `GET` | `/api/subjects/{subject_id}/sessions` | 对象会话时间线 |
-| `POST` | `/api/session/{session_id}/analyze` | 触发四路分析 + 分级 + 建单 |
-| `GET` | `/api/session/{session_id}/transcript` | 查看转写原文（敏感，留痕） |
-| `GET` | `/api/session/{session_id}/face` | 查看面部图（敏感，留痕） |
-| `POST` | `/api/reviews` | 按窗口计算复盘 |
-| `GET` | `/api/reviews` | 复盘列表（按对象、色码、时间） |
-| `GET` | `/api/reviews/{review_id}` | 复盘详情（含证据链） |
-| `GET` | `/api/tickets` | 复核队列 |
-| `GET` | `/api/tickets/{ticket_id}` | 工单详情（留痕） |
-| `POST` | `/api/tickets/{ticket_id}/transition` | 工单流转 |
-| `GET` | `/api/dashboard` | 看板数据（色码分布、7 日趋势、待复核数） |
+### 5.2 会话（`subject` 或 `staff`）
+
+| 方法 | 路径 | 状态 | 说明 |
+|---|---|---|---|
+| `POST` | `/api/sessions` | 已实现 | 异步发起一次采集，立即返回 `created` |
+| `GET` | `/api/sessions/{session_id}` | 已实现 | 查询会话（前端轮询用） |
+| `POST` | `/api/sessions/{session_id}/analyze` | 占位 | 触发四路分析（仅 `staff`；本轮返回 `5000`） |
+
+### 5.3 用户端（`/api/user/*`，需 `subject`）
+
+| 方法 | 路径 | 状态 | 说明 |
+|---|---|---|---|
+| `GET` | `/api/user/consent` | 未实现 | 查询本人同意状态 |
+| `PUT` | `/api/user/consent` | 未实现 | 提交同意（人脸、音频独立勾选） |
+| `POST` | `/api/user/consent/revoke` | 未实现 | 撤回同意 |
+| `GET` | `/api/user/sessions/{session_id}/feedback` | 未实现 | 中性结果反馈（不含色码） |
+
+### 5.4 管理端（`/api/admin/*`，需 `staff`）
+
+| 方法 | 路径 | 状态 | 说明 |
+|---|---|---|---|
+| `GET` | `/api/admin/subjects` | 已实现 | 对象列表（分页、关键词、状态） |
+| `POST` | `/api/admin/subjects` | 未实现 | 新建对象 |
+| `GET` | `/api/admin/subjects/{subject_id}` | 未实现 | 对象详情 |
+| `PATCH` | `/api/admin/subjects/{subject_id}` | 未实现 | 更新对象基础信息 |
+| `GET` | `/api/admin/sessions` | 已实现 | 会话列表（`subject_id`、`status` 过滤） |
+| `GET` | `/api/admin/sessions/{session_id}/face` | 已实现 | 查看面部图（敏感，留痕） |
+| `GET` | `/api/admin/sessions/{session_id}/transcript` | 未实现 | 查看转写原文（敏感，留痕） |
+| `POST` | `/api/admin/reviews` | 未实现 | 按窗口计算复盘 |
+| `GET` | `/api/admin/reviews` | 未实现 | 复盘列表 |
+| `GET` | `/api/admin/reviews/{review_id}` | 未实现 | 复盘详情（含证据链） |
+| `GET` | `/api/admin/tickets` | 未实现 | 复核队列 |
+| `GET` | `/api/admin/tickets/{ticket_id}` | 未实现 | 工单详情（留痕） |
+| `POST` | `/api/admin/tickets/{ticket_id}/transition` | 未实现 | 工单流转 |
+| `GET` | `/api/admin/dashboard` | 未实现 | 看板数据 |
 
 ## 6. 序列化脱敏规则
 
 | 接口 | 必须剔除 | 说明 |
 |---|---|---|
-| `GET /api/session/{id}/feedback` | `final_color`、`risk_level`、`evidence`、`rules_fired`、`transcript`、`face_path` | 用户端不显示色码 |
+| `GET /api/user/sessions/{id}/feedback` | `final_color`、`risk_level`、`evidence`、`rules_fired`、`transcript`、`face_path` | 用户端不显示色码 |
 | 所有用户端接口 | `consent_json` 之外的其他对象字段 | 仅返回必要信息 |
-| `GET /api/tickets/{id}` | 无 | 但需写 `audit_logs(sensitive.view)` |
-| `GET /api/session/{id}/transcript` | 无 | 必须写留痕 |
-| 全局日志 | 音频内容、转写原文、面部图 base64 | 红线 |
+| `GET /api/admin/tickets/{id}` | 无 | 但需写 `audit_logs(sensitive.view)` |
+| `GET /api/admin/sessions/{id}/transcript` | 无 | 必须写留痕 |
+| 全局日志 | 音频内容、转写原文、面部图 base64、`audio_path` 绝对路径 | 红线 |
 
 `feedback` 只允许返回：`status`、`summary_text`（中性表述）、`suggestion`（枚举）、`next_action`。
 
 ## 7. 端点详情
 
-### 7.1 `PUT /api/me/consent`
+### 7.1 `PUT /api/user/consent`（未实现）
 
 ```bash
-curl -X PUT http://localhost:8000/api/me/consent \
+curl -X PUT http://localhost:8000/api/user/consent \
   -H "Authorization: Bearer user_demo" \
   -H "Content-Type: application/json" \
   -d '{
@@ -155,22 +191,29 @@ curl -X PUT http://localhost:8000/api/me/consent \
     "revoked_at": null,
     "retention_days": 180
   },
-  "request_id": "req_01HF8Z3K9Q"
+  "degraded": [],
+  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
 }
 ```
 
-### 7.2 `POST /api/session`
+### 7.2 `POST /api/sessions`
 
-同步执行采集，最长阻塞 `CAPTURE_TIMEOUT_SEC`。
+异步发起一次采集：接口立即返回 `status=created`，采集由后台任务执行；完成后回写 `status` / `capture_status` / `face_path` / `audio_path` / `codes` / `duration_sec` / `captured_at`，失败也落库为 `status=failed` + `codes`。
+
+- 异步返回 `created`，不代表采集完成；
+- 状态流转固定为 `created → captured` 或 `created → failed`，不出现其他中间态；
+- 前端轮询 `GET /api/sessions/{id}` 获取最终状态；
+- 同一时刻仅允许一个采集任务，第二个请求返回 `code=5000`、`message=capture_busy`（专用错误码待增补）；
+- 入参 `subject_id` 必须已存在，否则 `1004`。
 
 ```bash
-curl -X POST http://localhost:8000/api/session \
+curl -X POST http://localhost:8000/api/sessions \
   -H "Authorization: Bearer user_demo" \
   -H "Content-Type: application/json" \
   -d '{
     "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
     "device_index": 0,
-    "duration_sec": 30
+    "duration_sec": 10
   }'
 ```
 
@@ -180,21 +223,43 @@ curl -X POST http://localhost:8000/api/session \
   "message": "ok",
   "data": {
     "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
-    "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
-    "status": "captured",
-    "capture_status": "ok",
-    "captured_at": "2026-11-23T10:12:36+08:00",
-    "duration_sec": 30.0,
-    "face_available": true,
-    "audio_available": true,
-    "degraded": [],
-    "codes": []
+    "status": "created"
   },
-  "request_id": "req_01HF8Z4A1B"
+  "degraded": [],
+  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
 }
 ```
 
-采集降级（`sessions.status=captured`，`capture_status in (partial, no_face, no_audio)`）：
+采集并发冲突：
+
+```json
+{
+  "code": 5000,
+  "message": "capture_busy",
+  "data": null,
+  "degraded": [],
+  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
+}
+```
+
+前置校验（本轮骨架仅实现 `subject_id` 存在性；consent 与 60 秒频控延期）：
+
+| 条件 | 失败返回 |
+|---|---|
+| `subject_id` 不存在 | `1004` |
+| 同时已有采集任务 | `5000`，`message=capture_busy` |
+| `consent.general.granted != true` | `1005`，`message=consent_required`（未实现） |
+| `revoked_at != null` | `1005`，`message=consent_revoked`（未实现） |
+| 60 秒内重复请求 | `1006`（未实现） |
+
+### 7.3 `GET /api/sessions/{session_id}`
+
+```bash
+curl http://localhost:8000/api/sessions/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f \
+  -H "Authorization: Bearer user_demo"
+```
+
+采集进行中：
 
 ```json
 {
@@ -202,18 +267,51 @@ curl -X POST http://localhost:8000/api/session \
   "message": "ok",
   "data": {
     "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
-    "status": "captured",
-    "capture_status": "partial",
-    "degraded": ["capture"],
+    "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
+    "status": "created",
+    "capture_status": null,
+    "coverage": null,
     "face_available": false,
-    "audio_available": true,
-    "codes": ["detector_unavailable"]
+    "audio_available": false,
+    "duration_sec": null,
+    "captured_at": null,
+    "analysis_status": "pending",
+    "codes": [],
+    "created_at": "2026-11-23T10:12:03+08:00",
+    "updated_at": "2026-11-23T10:12:03+08:00"
   },
-  "request_id": "req_01HF8Z4A1B"
+  "degraded": [],
+  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
 }
 ```
 
-采集失败（`sessions.status=failed`）：
+采集降级（`partial` / `no_face` / `no_audio`）：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
+    "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
+    "status": "captured",
+    "capture_status": "partial",
+    "coverage": "face_only",
+    "face_available": true,
+    "audio_available": false,
+    "duration_sec": 10.0,
+    "captured_at": "2026-11-23T10:12:36+08:00",
+    "analysis_status": "pending",
+    "codes": ["no_face"],
+    "created_at": "2026-11-23T10:12:03+08:00",
+    "updated_at": "2026-11-23T10:12:36+08:00"
+  },
+  "degraded": ["capture"],
+  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
+}
+```
+
+采集失败：
 
 ```json
 {
@@ -221,110 +319,75 @@ curl -X POST http://localhost:8000/api/session \
   "message": "capture_failed",
   "data": {
     "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
+    "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
     "status": "failed",
     "capture_status": "error",
-    "degraded": [],
+    "coverage": null,
     "face_available": false,
     "audio_available": false,
-    "codes": ["camera_unavailable"]
+    "duration_sec": null,
+    "captured_at": "2026-11-23T10:12:05+08:00",
+    "analysis_status": "pending",
+    "codes": ["camera_unavailable"],
+    "created_at": "2026-11-23T10:12:03+08:00",
+    "updated_at": "2026-11-23T10:12:05+08:00"
   },
-  "request_id": "req_01HF8Z4A1B"
+  "degraded": [],
+  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
 }
 ```
 
-`degraded` 字段说明：
+- `coverage` 只能来自 `CaptureSession.coverage` 派生属性，API 层不得重新推导；
+- `face_available` / `audio_available` 由 `face_path` / `audio_path` 是否非空决定；
+- 响应只给相对 `face_path` 语义的可用性标记，不返回路径本身、不返回音频或图像二进制；
+- `code` 判定：`status == failed` → `2001`（`message=capture_failed`）；否则 `analysis_status == failed` → `2003`（`message=analysis_failed`）；其余 `code=0`；两种失败都仍返回会话摘要便于展示 `codes`。
 
-| 值 | 含义 |
-|---|---|
-| `[]` | 未降级 |
-| `["capture"]` | 采集降级（`capture_status in (partial, no_face, no_audio)`） |
-| `["analysis"]` | 分析降级（`analysis_status=degraded`，结果可用） |
-| `["capture","analysis"]` | 两者同时降级 |
-
-- 数组元素去重，固定顺序 `capture` → `analysis`；
-- 会话响应只可能含 `"capture"`，分析响应可含两者；
-- `analysis_status=failed` 不属于降级：返回 `2003`，`analysis` / `review` / `ticket` 均为 `null`。
-
-前置校验：
-
-| 条件 | 失败返回 |
-|---|---|
-| `consent.general.granted != true` | `1005`，`message=consent_required` |
-| `face=true` 但 `audio=false` 且本次请求有 `duration_sec` | 允许，仅采集人脸 |
-| `revoked_at != null` | `1005`，`message=consent_revoked` |
-| 60 秒内重复请求 | `1006` |
-
-### 7.3 `POST /api/session/{session_id}/analyze`
+### 7.4 `POST /api/sessions/{session_id}/analyze`（占位）
 
 ```bash
-curl -X POST http://localhost:8000/api/session/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f/analyze \
+curl -X POST http://localhost:8000/api/sessions/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f/analyze \
   -H "Authorization: Bearer admin_demo"
 ```
 
 ```json
 {
-  "code": 0,
-  "message": "ok",
-  "data": {
-    "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
-    "analysis_status": "done",
-    "consistency": "medium",
-    "needs_review": false,
-    "degraded": [],
-    "analysis": { "schema_version": "1.0", "channels": { "...": "..." } },
-    "review": {
-      "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b1c",
-      "single_session_risk": "none",
-      "trend_color": "blue",
-      "final_color": "blue",
-      "manual_review": false,
-      "rules_fired": ["R_TREND_BLUE"]
-    },
-    "ticket": {
-      "ticket_id": "5e2f9b11-3c4d-4a6b-8e7f-0a1b2c3d4e5f",
-      "status": "pending",
-      "priority": "P2"
-    }
-  },
-  "request_id": "req_01HF8Z5C2D"
+  "code": 5000,
+  "message": "analysis_pipeline_not_ready",
+  "data": null,
+  "degraded": [],
+  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
 }
 ```
 
-- `session.status != captured` → `1005`；
-- `session.status == created` 表示采集尚未完成，不可进入分析（返回 `1005`），也不计入复盘；
-- 重复调用返回首次结果，不重复建单；
-- `analysis_status=failed` → `code=2003`，`analysis` / `review` / `ticket` 均为 `null`；
-- 绿结果时 `ticket` 为 `null`；**例外**：`degraded` 含 `"analysis"` 且最终色为绿时按 `R_DEGRADED_REVIEW` 建 `P1` 单（见 [../grading.md](../grading.md#6-复核触发条件)）；若会话为采集 `partial` / 单模态，按规则 8 取 `P0`。
+| 条件 | 返回 |
+|---|---|
+| 会话不存在 | `1004` |
+| `status == created` | `4000`，`message=session_not_captured` |
+| `status == failed` | `2001`，`message=capture_failed` |
+| `status == captured` | `5000`，`message=analysis_pipeline_not_ready`（本轮占位） |
+| 非 `staff` token | `1003` |
 
-### 7.4 `GET /api/session/{session_id}/feedback`（用户端）
+- 以上判断不落库、不改任何字段；
+- 分析管线接入后，`captured` 分支改为返回分析结果（`analysis_status` 决定 `degraded`），并恢复 `2003` 语义。
 
-```bash
-curl http://localhost:8000/api/session/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f/feedback \
-  -H "Authorization: Bearer user_demo"
-```
-
-```json
-{
-  "code": 0,
-  "message": "ok",
-  "data": {
-    "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
-    "status": "captured",
-    "summary_text": "本次记录已完成。",
-    "suggestion": "keep_routine",
-    "next_action": "下次按约定时间再来即可"
-  },
-  "request_id": "req_01HF8Z6D3E"
-}
-```
-
-`suggestion` 枚举：`keep_routine` / `talk_to_staff` / `recapture`。
-**不得出现**色码、规则编号、分数、诊断词。
-
-### 7.5 `GET /api/subjects`（管理端）
+### 7.5 `GET /api/admin/sessions/{session_id}/face`
 
 ```bash
-curl "http://localhost:8000/api/subjects?keyword=S001&status=active&page=1&page_size=20" \
+curl -o face.jpg http://localhost:8000/api/admin/sessions/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f/face \
+  -H "Authorization: Bearer admin_demo"
+```
+
+- 成功：`image/jpeg` 二进制（信封唯一例外）；
+- 路径按 `STORAGE_ROOT + face_path` 解析，且必须落在 `STORAGE_ROOT` 之内；
+- 每次成功读取前写一条 `audit_logs`：`actor_type=staff`、`action=sensitive.view`、`target_type=session`、`target_id={session_id}`、`detail_json={"field":"face"}`、`request_id={本次请求 id}`，**不得写入路径或图像内容**；
+- 留痕写入失败 → `5000`、`message=audit_write_failed`，且不得返回图片；
+- 会话不存在或文件缺失 → `1004`；
+- 非 `staff` token → `1003`。
+
+### 7.6 `GET /api/admin/subjects`
+
+```bash
+curl "http://localhost:8000/api/admin/subjects?keyword=S001&status=active&page=1&page_size=20" \
   -H "Authorization: Bearer admin_demo"
 ```
 
@@ -339,10 +402,10 @@ curl "http://localhost:8000/api/subjects?keyword=S001&status=active&page=1&page_
         "code": "S001",
         "name": "张某某",
         "status": "active",
-        "latest_color": "blue",
-        "latest_color_at": "2026-11-23T10:13:00+08:00",
-        "latest_rules": ["R_TREND_BLUE"],
-        "pending_tickets": 1,
+        "latest_color": null,
+        "latest_color_at": null,
+        "latest_rules": [],
+        "pending_tickets": 0,
         "latest_session_at": "2026-11-23T10:12:36+08:00"
       }
     ],
@@ -350,13 +413,67 @@ curl "http://localhost:8000/api/subjects?keyword=S001&status=active&page=1&page_
     "page_size": 20,
     "total": 1
   },
-  "request_id": "req_01HF8Z7E4F"
+  "degraded": [],
+  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
 }
 ```
 
-`latest_color` 必须同时返回 `latest_color_at` 与 `latest_rules`；前端渲染色码时必须并列展示规则与证据入口，不允许只渲染颜色块。
+`latest_color` 必须同时返回 `latest_color_at` 与 `latest_rules`；前端渲染色码时必须并列展示规则与证据入口，不允许只渲染颜色块。尚无复盘数据时三者分别为 `null` / `null` / `[]`。
 
-### 7.6 `GET /api/reviews/{review_id}`
+### 7.7 `GET /api/admin/sessions`
+
+```bash
+curl "http://localhost:8000/api/admin/sessions?subject_id=3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c&status=captured" \
+  -H "Authorization: Bearer admin_demo"
+```
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "items": [
+      {
+        "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
+        "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
+        "status": "captured",
+        "capture_status": "partial",
+        "coverage": "face_only",
+        "analysis_status": "pending",
+        "captured_at": "2026-11-23T10:12:36+08:00"
+      }
+    ],
+    "page": 1,
+    "page_size": 20,
+    "total": 1
+  },
+  "degraded": [],
+  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
+}
+```
+
+### 7.8 `GET /api/user/sessions/{session_id}/feedback`（未实现）
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
+    "status": "captured",
+    "summary_text": "本次记录已完成。",
+    "suggestion": "keep_routine",
+    "next_action": "下次按约定时间再来即可"
+  },
+  "degraded": [],
+  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
+}
+```
+
+`suggestion` 枚举：`keep_routine` / `talk_to_staff` / `recapture`。
+**不得出现**色码、规则编号、分数、诊断词。
+
+### 7.9 `GET /api/admin/reviews/{review_id}`（未实现）
 
 ```json
 {
@@ -391,14 +508,15 @@ curl "http://localhost:8000/api/subjects?keyword=S001&status=active&page=1&page_
     ],
     "created_at": "2026-11-23T10:13:00+08:00"
   },
-  "request_id": "req_01HF8Z8F5G"
+  "degraded": [],
+  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
 }
 ```
 
-### 7.7 `POST /api/tickets/{ticket_id}/transition`
+### 7.10 `POST /api/admin/tickets/{ticket_id}/transition`（未实现）
 
 ```bash
-curl -X POST http://localhost:8000/api/tickets/5e2f9b11-3c4d-4a6b-8e7f-0a1b2c3d4e5f/transition \
+curl -X POST http://localhost:8000/api/admin/tickets/5e2f9b11-3c4d-4a6b-8e7f-0a1b2c3d4e5f/transition \
   -H "Authorization: Bearer admin_demo" \
   -H "Content-Type: application/json" \
   -d '{
@@ -423,7 +541,8 @@ curl -X POST http://localhost:8000/api/tickets/5e2f9b11-3c4d-4a6b-8e7f-0a1b2c3d4
     "assignee": "E1024",
     "closed_at": "2026-11-23T15:20:00+08:00"
   },
-  "request_id": "req_01HF8Z9G6H"
+  "degraded": [],
+  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
 }
 ```
 
@@ -435,7 +554,7 @@ curl -X POST http://localhost:8000/api/tickets/5e2f9b11-3c4d-4a6b-8e7f-0a1b2c3d4
 | `correct` | `conclusion_color`、`note` | 缺字段 → `1001` |
 | `close` | `note` | 缺字段 → `1001` |
 
-### 7.8 `GET /api/dashboard`
+### 7.11 `GET /api/admin/dashboard`（未实现）
 
 ```json
 {
@@ -451,7 +570,8 @@ curl -X POST http://localhost:8000/api/tickets/5e2f9b11-3c4d-4a6b-8e7f-0a1b2c3d4
     "pending_tickets": 1,
     "last_session_at": "2026-11-23T10:12:36+08:00"
   },
-  "request_id": "req_01HF8ZAH7J"
+  "degraded": [],
+  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
 }
 ```
 
@@ -463,11 +583,11 @@ curl -X POST http://localhost:8000/api/tickets/5e2f9b11-3c4d-4a6b-8e7f-0a1b2c3d4
 
 | 文件 | 覆盖接口 |
 |---|---|
-| `subject.json` | `/api/subjects*` |
-| `session.json` | `/api/session*` |
-| `review.json` | `/api/reviews*` |
-| `ticket.json` | `/api/tickets*` |
-| `dashboard.json` | `/api/dashboard` |
+| `subject.json` | `/api/admin/subjects*` |
+| `session.json` | `/api/sessions*`、`/api/admin/sessions*` |
+| `review.json` | `/api/admin/reviews*` |
+| `ticket.json` | `/api/admin/tickets*` |
+| `dashboard.json` | `/api/admin/dashboard` |
 
 mock 数据必须与本节示例字段完全一致，不得增删字段。
 
@@ -483,3 +603,5 @@ mock 数据必须与本节示例字段完全一致，不得增删字段。
 | 版本 | 日期 | 内容 |
 |---|---|---|
 | 1.0 | 2026-11-23 | 初版 |
+| 1.3 | 2026-11-23 | 补 `created` 会话不可分析、不计入复盘 |
+| 1.4 | 2026-11-23 | 信封改为 `{code,message,data,degraded,request_id}`（中间件 uuid4 + `X-Request-Id` + 日志/audit）；业务码 HTTP 200、未捕获异常 HTTP 500；路由统一为 `/api/sessions` + `/api/admin/*` + `/api/user/*`；`POST /api/sessions` 改异步 + 轮询；新增 `4000`；`5000` 增加 `analysis_pipeline_not_ready` / `capture_busy` 临时语义；鉴权改为 `USER_TOKEN` / `ADMIN_TOKEN`，`APP_ENV=production` 缺配置直接启动失败 |
