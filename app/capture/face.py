@@ -12,8 +12,8 @@ from typing import List, Optional, Sequence, Tuple
 from .config import (
     CROP_MARGIN,
     JPEG_QUALITY,
-    MAX_FACE_SIDE,
     MIN_FACE_AREA_RATIO,
+    OUTPUT_SIDE,
 )
 from .models import CaptureDependencyError, FaceResult
 
@@ -220,7 +220,7 @@ def detect_face(frame) -> FaceResult:
 
         # 面积占比过小说明画面中即使有脸也不可用，按“未检出”处理
         if best_area / frame_area < MIN_FACE_AREA_RATIO:
-            continue
+            return FaceResult(status="no_face")
         return FaceResult(status="ok", bbox=best, detector=name)
 
     if not available:
@@ -253,38 +253,45 @@ def _crop_box(shape, bbox: BBox, margin: float) -> Tuple[int, int, int]:
     return left, top, side
 
 
-def crop_output_size(
-    frame_shape,
-    bbox: BBox,
-    margin: float = CROP_MARGIN,
-    max_side: int = MAX_FACE_SIDE,
-) -> Tuple[int, int]:
-    """返回裁剪后的实际输出尺寸，供 meta.json 使用。"""
-    _, _, side = _crop_box(frame_shape, bbox, margin)
-    output_side = min(side, int(max_side))
-    return (output_side, output_side)
-
-
 def crop_face(
     frame,
     bbox: BBox,
     margin: float = CROP_MARGIN,
-    max_side: int = MAX_FACE_SIDE,
+    output_side: int = OUTPUT_SIDE,
     jpeg_quality: int = JPEG_QUALITY,
-) -> bytes:
-    """裁剪人脸正方形并编码为 JPEG bytes。"""
-    cv2 = _import_cv2()
-    if frame is None:
-        raise ValueError("invalid frame")
+) -> Optional[bytes]:
+    """裁剪人脸并编码为固定 output_side × output_side 的正方形 JPEG。
 
-    left, top, side = _crop_box(frame.shape, bbox, margin)
-    image = frame[top : top + side, left : left + side]
-    if side > int(max_side):
-        image = cv2.resize(image, (int(max_side), int(max_side)), interpolation=cv2.INTER_AREA)
+    任何失败（依赖缺失、空帧、非法 bbox、编码失败等）一律返回 None，
+    不向上抛异常；由调用方记为 `crop_failed`。
+    """
+    try:
+        cv2 = _import_cv2()
+        if frame is None:
+            return None
 
-    ok, buffer = cv2.imencode(
-        ".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), int(jpeg_quality)]
-    )
-    if not ok:
-        raise RuntimeError("jpeg_encode_failed")
-    return buffer.tobytes()
+        shape = getattr(frame, "shape", None)
+        if not shape or len(shape) < 2:
+            return None
+
+        left, top, side = _crop_box(shape, bbox, margin)
+        image = frame[top : top + side, left : left + side]
+        if image is None or int(getattr(image, "size", 0)) <= 0:
+            return None
+
+        side_out = int(output_side)
+        if side_out <= 0:
+            return None
+        # 固定正方形输出：无论裁剪区域多大，一律缩放到 output_side 见方
+        image = cv2.resize(
+            image, (side_out, side_out), interpolation=cv2.INTER_AREA
+        )
+
+        ok, buffer = cv2.imencode(
+            ".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), int(jpeg_quality)]
+        )
+        if not ok or buffer is None:
+            return None
+        return buffer.tobytes()
+    except Exception:
+        return None

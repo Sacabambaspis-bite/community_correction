@@ -36,9 +36,21 @@ def record_audio(
     try:
         total_frames = int(float(duration_sec) * int(sample_rate))
     except Exception:
-        return AudioResult(status="error", reason="invalid_duration")
+        return AudioResult(status="error", reason="audio_record_failed")
     if total_frames <= 0 or int(sample_rate) <= 0 or int(channels) <= 0:
-        return AudioResult(status="error", reason="invalid_duration")
+        return AudioResult(status="error", reason="audio_record_failed")
+
+    # 先校验输入设备，设备不存在/不可用时记 audio_device_unavailable
+    try:
+        checker = getattr(sd, "check_input_settings", None)
+        if checker is not None:
+            checker(
+                device=mic_index,
+                samplerate=int(sample_rate),
+                channels=int(channels),
+            )
+    except Exception:
+        return AudioResult(status="error", reason="audio_device_unavailable")
 
     try:
         data = sd.rec(
@@ -50,10 +62,10 @@ def record_audio(
         )
         sd.wait()
     except Exception:
-        return AudioResult(status="error", reason="mic_unavailable")
+        return AudioResult(status="error", reason="audio_record_failed")
 
     if data is None:
-        return AudioResult(status="error", reason="mic_unavailable")
+        return AudioResult(status="error", reason="audio_record_failed")
 
     data = np.asarray(data)
     if data.size == 0:

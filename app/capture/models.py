@@ -5,10 +5,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, Optional, Tuple
 
-CaptureStatus = Literal["ok", "no_face", "no_audio", "no_face_no_audio", "error"]
+CaptureStatus = Literal[
+    "ok", "partial", "no_face", "no_audio", "no_face_no_audio", "error"
+]
 
 
 class CaptureDependencyError(RuntimeError):
@@ -46,4 +48,4 @@ class CaptureResult:
     meta: dict
     face_path: Optional[str] = None
     audio_path: Optional[str] = None
-    reason: Optional[str] = None
+    codes: list[str] = field(default_factory=list)  # 首条为最致命 code，其余按发生顺序

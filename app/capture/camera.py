@@ -17,7 +17,8 @@ def capture_frame(
     """打开摄像头抓取单帧 BGR 图像。
 
     原始帧只返回给调用方，本函数不落盘、不打印。设备打不开返回
-    `camera_unavailable`，设备已打开但读帧失败返回 `frame_capture_failed`。
+    `camera_unavailable` / `camera_open_failed`，设备已打开但读帧失败返回
+    `invalid_frame`。
     """
     try:
         import cv2
@@ -26,8 +27,11 @@ def capture_frame(
 
     cap = None
     try:
-        cap = cv2.VideoCapture(int(device_index))
-        if not cap.isOpened():
+        try:
+            cap = cv2.VideoCapture(int(device_index))
+        except Exception:
+            return FrameResult(status="error", frame=None, reason="camera_open_failed")
+        if cap is None or not cap.isOpened():
             return FrameResult(status="error", frame=None, reason="camera_unavailable")
 
         width, height = int(resolution[0]), int(resolution[1])
@@ -45,16 +49,18 @@ def capture_frame(
                 frame = candidate
 
         if frame is None:
-            return FrameResult(status="error", frame=None, reason="frame_capture_failed")
+            return FrameResult(status="error", frame=None, reason="invalid_frame")
 
         frame_height, frame_width = int(frame.shape[0]), int(frame.shape[1])
+        if frame_height <= 0 or frame_width <= 0:
+            return FrameResult(status="error", frame=None, reason="invalid_frame")
         return FrameResult(
             status="ok",
             frame=frame,
             resolution=(frame_width, frame_height),
         )
     except Exception:
-        return FrameResult(status="error", frame=None, reason="frame_capture_failed")
+        return FrameResult(status="error", frame=None, reason="invalid_frame")
     finally:
         if cap is not None:
             try:
