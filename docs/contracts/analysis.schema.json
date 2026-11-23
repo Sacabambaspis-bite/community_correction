@@ -1,0 +1,341 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://community-correction.local/contracts/analysis.schema.json",
+  "title": "AnalysisResult",
+  "description": "单次会话的四路分析汇总结果。analysis-engineer 输出必须通过本 schema 校验；校验失败不得进入 grading。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "session_id",
+    "subject_id",
+    "overall",
+    "channels",
+    "consistency",
+    "consistency_basis",
+    "needs_review",
+    "degraded",
+    "threshold_profile",
+    "started_at",
+    "finished_at",
+    "latency_ms"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "session_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "subject_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "overall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text_valence", "text_signal", "risk_level", "summary_signal"],
+      "properties": {
+        "text_valence": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1,
+          "description": "文本情感极性，-1 最消极，1 最积极"
+        },
+        "text_signal": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "心理文本信号强度，越高表示消极信号越强。仅表达强度，不做诊断"
+        },
+        "risk_level": {
+          "type": "string",
+          "enum": ["none", "watch", "elevated", "high", "crisis"],
+          "description": "分析侧的风险提示档位，非最终五色。grading 只读取该字段，不被 consistency 反向修改"
+        },
+        "summary_signal": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "中性描述，如「语音情绪偏低，文本未出现明确意图」。禁止诊断词"
+        }
+      }
+    },
+    "channels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asr", "emotion", "face", "psych"],
+      "properties": {
+        "asr": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "model_version", "latency_ms", "confidence", "output", "reason"],
+          "properties": {
+            "status": { "$ref": "#/$defs/channel_status" },
+            "model_version": { "type": "string", "minLength": 1 },
+            "latency_ms": { "type": "integer", "minimum": 0 },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "output": {
+              "oneOf": [
+                { "type": "null" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["transcript_path", "duration_sec", "speech_ratio", "char_count"],
+                  "properties": {
+                    "transcript_path": {
+                      "type": "string",
+                      "description": "转写文本相对路径。原文不进入本 JSON，仅在显式接口中按需读取"
+                    },
+                    "duration_sec": { "type": "number", "minimum": 0 },
+                    "speech_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "char_count": { "type": "integer", "minimum": 0 }
+                  }
+                }
+              ]
+            },
+            "reason": { "type": ["string", "null"] }
+          }
+        },
+        "emotion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "model_version", "latency_ms", "confidence", "output", "reason"],
+          "properties": {
+            "status": { "$ref": "#/$defs/channel_status" },
+            "model_version": { "type": "string", "minLength": 1 },
+            "latency_ms": { "type": "integer", "minimum": 0 },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "output": {
+              "oneOf": [
+                { "type": "null" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["valence", "arousal", "label"],
+                  "properties": {
+                    "valence": { "type": "number", "minimum": -1, "maximum": 1 },
+                    "arousal": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "label": {
+                      "type": "string",
+                      "enum": ["neutral", "low", "negative", "strong_negative"]
+                    }
+                  }
+                }
+              ]
+            },
+            "reason": { "type": ["string", "null"] }
+          }
+        },
+        "face": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "model_version", "latency_ms", "confidence", "output", "reason"],
+          "properties": {
+            "status": { "$ref": "#/$defs/channel_status" },
+            "model_version": { "type": "string", "minLength": 1 },
+            "latency_ms": { "type": "integer", "minimum": 0 },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "output": {
+              "oneOf": [
+                { "type": "null" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["expression_label", "intensity", "face_confidence", "frame_count", "valid_frames"],
+                  "properties": {
+                    "expression_label": {
+                      "type": "string",
+                      "enum": ["neutral", "sad", "anxious", "angry", "positive"]
+                    },
+                    "intensity": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "face_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "frame_count": { "type": "integer", "minimum": 0 },
+                    "valid_frames": { "type": "integer", "minimum": 0 }
+                  }
+                }
+              ]
+            },
+            "reason": { "type": ["string", "null"] }
+          }
+        },
+        "psych": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "model_version", "latency_ms", "confidence", "output", "reason"],
+          "properties": {
+            "status": { "$ref": "#/$defs/channel_status" },
+            "model_version": { "type": "string", "minLength": 1 },
+            "latency_ms": { "type": "integer", "minimum": 0 },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "output": {
+              "oneOf": [
+                { "type": "null" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["signal_strength", "intent_flag", "keywords", "rationale_signal"],
+                  "properties": {
+                    "signal_strength": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 100,
+                      "description": "心理文本信号强度。grading 的单次规则主要消费该字段"
+                    },
+                    "intent_flag": {
+                      "type": "string",
+                      "enum": ["none", "self_harm_mention", "suicide_intent"],
+                      "description": "明确意图标记。suicide_intent 由 grading 直接判红"
+                    },
+                    "keywords": {
+                      "type": "array",
+                      "items": { "type": "string", "maxLength": 20 },
+                      "maxItems": 10,
+                      "description": "触发关键词，用于人工复核定位。不记录完整句子"
+                    },
+                    "rationale_signal": {
+                      "type": "string",
+                      "maxLength": 120,
+                      "description": "中性描述的分析依据，禁止诊断性结论"
+                    }
+                  }
+                }
+              ]
+            },
+            "reason": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+    "consistency": {
+      "type": "string",
+      "enum": ["high", "medium", "low"],
+      "description": "三路情感（文本/语音/表情）结论一致性。low 只下调置信度并转人工，不升级 risk_level"
+    },
+    "consistency_basis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agree_count", "conflict", "low_confidence_channels"],
+      "properties": {
+        "agree_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3,
+          "description": "方向一致的路数"
+        },
+        "conflict": {
+          "type": "boolean",
+          "description": "是否存在方向相反的两路结论"
+        },
+        "low_confidence_channels": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["asr", "emotion", "face", "psych"] },
+          "uniqueItems": true
+        }
+      }
+    },
+    "needs_review": {
+      "type": "boolean",
+      "description": "是否需要人工复核。consistency=low 或 degraded=true 时必须为 true"
+    },
+    "degraded": {
+      "type": "boolean",
+      "description": "任一路为 degraded 或 skipped 时为 true"
+    },
+    "threshold_profile": {
+      "type": "string",
+      "const": "default@v1",
+      "description": "阈值配置档案，对应 app/grading/config.py 中的 THRESHOLD_PROFILE"
+    },
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": "string", "format": "date-time" },
+    "latency_ms": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "channel_status": {
+      "type": "string",
+      "enum": ["ok", "degraded", "skipped"],
+      "description": "ok 正常；degraded 执行但异常；skipped 不可用未执行"
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "1.0",
+      "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
+      "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
+      "overall": {
+        "text_valence": -0.34,
+        "text_signal": 41.2,
+        "risk_level": "watch",
+        "summary_signal": "语音情绪偏低，文本未出现明确意图，表情中性"
+      },
+      "channels": {
+        "asr": {
+          "status": "ok",
+          "model_version": "mock-asr@1.0",
+          "latency_ms": 12,
+          "confidence": 0.93,
+          "output": {
+            "transcript_path": "subjects/S001/sessions/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f/transcript.txt",
+            "duration_sec": 30.0,
+            "speech_ratio": 0.62,
+            "char_count": 148
+          },
+          "reason": null
+        },
+        "emotion": {
+          "status": "ok",
+          "model_version": "mock-emotion@1.0",
+          "latency_ms": 21,
+          "confidence": 0.81,
+          "output": {
+            "valence": -0.42,
+            "arousal": 0.36,
+            "label": "negative"
+          },
+          "reason": null
+        },
+        "face": {
+          "status": "ok",
+          "model_version": "mock-face@1.0",
+          "latency_ms": 18,
+          "confidence": 0.67,
+          "output": {
+            "expression_label": "neutral",
+            "intensity": 0.22,
+            "face_confidence": 0.71,
+            "frame_count": 3,
+            "valid_frames": 3
+          },
+          "reason": null
+        },
+        "psych": {
+          "status": "ok",
+          "model_version": "mock-psych@1.0",
+          "latency_ms": 34,
+          "confidence": 0.78,
+          "output": {
+            "signal_strength": 41.2,
+            "intent_flag": "none",
+            "keywords": ["累", "睡不着"],
+            "rationale_signal": "出现疲劳与睡眠相关表达，未出现指向性意图"
+          },
+          "reason": null
+        }
+      },
+      "consistency": "medium",
+      "consistency_basis": {
+        "agree_count": 2,
+        "conflict": false,
+        "low_confidence_channels": []
+      },
+      "needs_review": false,
+      "degraded": false,
+      "threshold_profile": "default@v1",
+      "started_at": "2026-11-23T10:12:37+08:00",
+      "finished_at": "2026-11-23T10:12:38+08:00",
+      "latency_ms": 85
+    }
+  ]
+}
