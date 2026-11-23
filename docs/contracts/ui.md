@@ -2,12 +2,12 @@
 
 | 项 | 值 |
 |---|---|
-| 契约版本 | `ui@1.1` |
+| 契约版本 | `ui@1.2` |
 | 所有者 | fe-user（`web/src/user/`）、fe-admin（`web/src/admin/`） |
 | 依赖 | [api.md](./api.md)、[../grading.md](../grading.md)（色码唯一来源） |
 | 技术栈 | React + Vite，路由用 `react-router` |
 
-> 本版已冻结，后续仅接受实现驱动的变更。
+> v1.2 已冻结，后续仅接受实现驱动的变更。
 
 ---
 
@@ -76,13 +76,13 @@
 
 **失败态文案映射**（`capture_status` → 用户可见文案）
 
-| `capture_status` | 文案 | 操作 |
-|---|---|---|
-| `partial` | 本次数据不完整，已转人工复核 | 查看结果 |
-| `no_face` | 本次数据不完整，已转人工复核 | 重试 |
-| `no_audio` | 本次数据不完整，已转人工复核 | 重试 |
-| `no_face_no_audio` | 本次采集未成功，请重试或联系工作人员 | 重试 / 联系 |
-| `error` | 设备暂时不可用，请联系工作人员 | 联系 |
+| `capture_status` | 文案 | 副文案 | 操作 |
+|---|---|---|---|
+| `partial` | 本次数据不完整，已转人工复核 | — | 查看结果 |
+| `no_face` | 没有识别到面部，请正对摄像头再试一次 | 已转人工复核 | 重试 |
+| `no_audio` | 没有采集到有效的声音，请靠近麦克风再试一次 | 已转人工复核 | 重试 |
+| `no_face_no_audio` | 本次采集未成功，请重试或联系工作人员 | — | 重试 / 联系 |
+| `error` | 设备暂时不可用，请联系工作人员 | — | 联系 |
 
 ### 3.3 结果反馈页 `/feedback/:sessionId`
 
@@ -236,8 +236,8 @@ type ColorBadgeProps = {
 | `code=1005` | 按 `message` 映射具体提示（如 `consent_required`） |
 | `code=1006` | 提示稍后再试，倒计时禁用按钮 |
 | `code=2001` | `sessions.status=failed`，按 `capture_status`（`no_face_no_audio` / `error`）展示第 3.2 节映射文案 |
-| `code=0` 且 `degraded=true` | 按 `capture_status`（`partial` / `no_face` / `no_audio`）展示第 3.2 节文案，结果页可用 |
-| `code=2002` | 展示"部分分析未完成"的提示，但结论可用 |
+| `degraded` 含 `"capture"` | 按 `capture_status`（`partial`）展示第 3.2 节文案，结果页可用 |
+| `code=2003` | 分析未完成、结果不可用，提示重采或联系工作人员 |
 | `code=5000` | 通用失败提示 + 重试按钮，禁止展示堆栈 |
 
 所有失败态必须有可见文案，不允许白屏或静默失败。

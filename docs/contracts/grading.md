@@ -2,13 +2,13 @@
 
 | 项 | 值 |
 |---|---|
-| 契约版本 | `grading@1.1` |
+| 契约版本 | `grading@1.2` |
 | 所有者 | grading-engineer（`app/grading/`） |
 | 业务规则 | [../grading.md](../grading.md)（唯一权威） |
 | 上游 | `AnalysisResult`（[analysis.schema.json](./analysis.schema.json)） |
 | 下游 | `api` 落 `reviews` / `review_tickets` |
 
-> 本版已冻结，后续仅接受实现驱动的变更。
+> v1.2 已冻结，后续仅接受实现驱动的变更。
 
 > 本文只写**工程契约**：函数签名、数据结构、配置键、测试矩阵。五色含义、规则语义、阈值标定说明一律以 [../grading.md](../grading.md) 为准，本文不重复定义。
 
@@ -142,7 +142,8 @@ def compose(
     degraded: bool,
     now: str,
 ) -> FinalGrading:
-    """合成：取大 → 低一致性封顶 → 标记复核。"""
+    """合成：取大 → 低一致性封顶 → 标记复核。
+    `degraded` 由 `analysis_status == "degraded"` 得到，仅表示分析降级；采集降级不走此参数。"""
 
 
 def build_ticket(final: FinalGrading, review_id: str, subject_id: str, now: str) -> dict:
@@ -216,7 +217,7 @@ SUGGESTED_METHOD: dict[str, str] = {
   "evidence_json": [
     {
       "rule_id": "R_TREND_BLUE",
-      "rule_version": "grading@1.1",
+      "rule_version": "grading@1.2",
       "field_path": "channels.psych.output.signal_strength",
       "observed_value": 41.2,
       "threshold_key": "TREND_BLUE_OFFSET_MIN",

@@ -2,13 +2,13 @@
 
 | 项 | 值 |
 |---|---|
-| 文档版本 | `grading@1.1` |
+| 文档版本 | `grading@1.2` |
 | 状态 | 待评审 |
 | 适用 | 所有实现与前端展示以本文为准 |
 | 工程契约 | [contracts/grading.md](./contracts/grading.md)（函数签名、配置键、工单结构） |
 | 关联 | [prd.md](./prd.md)、[architecture.md](./architecture.md)、[contracts/db.md](./contracts/db.md) |
 
-> 本版已冻结，后续仅接受实现驱动的变更。
+> v1.2 已冻结，后续仅接受实现驱动的变更。
 
 > 本文只定义**业务规则**。阈值的技术取值、配置键名与函数落点在 [contracts/grading.md](./contracts/grading.md)，两处不得重复定义同一阈值。
 
@@ -123,6 +123,8 @@ step4  if degraded == true:      needs_review = true，并计入 R_DEGRADED_REVI
 
 `step4` 不改变 `final_color`，只决定是否建单。因此存在"绿 + 降级"的组合，见第 6 节条件 6。
 
+本文中的 `degraded` 一律指**分析降级**，即 `analysis_status == "degraded"`；对应 [api.md](./contracts/api.md) 响应 `degraded` 数组中的 `"analysis"` 元素，与采集降级（`partial` / 单模态）无关。
+
 `max` 的 `none` 处理：`single_session_risk = none` 时按等级 0 参与比较，即直接取趋势色。
 
 ### 5.1 合成示例
@@ -153,7 +155,7 @@ step4  if degraded == true:      needs_review = true，并计入 R_DEGRADED_REVI
 | 5 | `consistency == "low"`（无论最终色） | 是，且强制 `manual_review=1` | `P0` | 24 小时内 |
 | 6 | `degraded == true` 且最终色为绿（`R_DEGRADED_REVIEW`） | 是（补采 / 复核单） | `P1` | 72 小时内 |
 | 7 | `final_color == "green"` 且无上述情况 | **否** | — | — |
-| 8 | `capture_status in (partial, no_face, no_audio)`（技术性降级或单模态）：`consistency` 强制 `low`、`final_color` 上限 `orange`、必建 `P0` 工单 | 是，且强制 `manual_review=1` | `P0` | 24 小时内 |
+| 8 | `capture_status in (partial, no_face, no_audio)`（技术性降级或单模态） | 是，且强制 `manual_review=1` | `P0`（同规则 5） | 24 小时内 |
 | 8a | `capture_status in (no_face_no_audio, error)`（无任何可用产物） | **否** | — | 由前端提示重采，不进分析队列 |
 | 9 | 窗口无可用会话 | **否** | — | 返回 `no_session_in_window` |
 | 10 | `R_BASELINE_INSUFFICIENT` 单独命中 | 随蓝一起建单 | `P2` | 7 天内 |
@@ -186,7 +188,7 @@ step4  if degraded == true:      needs_review = true，并计入 R_DEGRADED_REVI
 | 字段 | 说明 |
 |---|---|
 | `rule_id` | 规则编号，如 `R_TREND_BLUE` |
-| `rule_version` | 规则版本，如 `grading@1.1` |
+| `rule_version` | 规则版本，如 `grading@1.2` |
 | `field_path` | 触发字段路径，如 `channels.psych.output.signal_strength` |
 | `observed_value` | 实际观测值 |
 | `threshold_key` | 阈值配置键名 |
@@ -244,6 +246,7 @@ step4  if degraded == true:      needs_review = true，并计入 R_DEGRADED_REVI
 |---|---|---|
 | `grading@1.0` | 2026-11-23 | 初版：五色定义、单次与趋势规则、合成封顶、复核触发 |
 | `grading@1.1` | 2026-11-23 | 规则 8 收敛：partial 与单模态强制 `consistency=low`、颜色上限 `orange`、必须建单；无产物会话不建单 |
+| `grading@1.2` | 2026-11-23 | 规则 8 的 `P0` 恢复“同规则 5”引用；v1.2 冻结 |
 
 变更要求：
 

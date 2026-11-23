@@ -7,7 +7,7 @@
 | 上游 | `POST /api/session`（见 [api.md](./api.md)） |
 | 下游 | `app/analysis/` 读取 `face_path` / `audio_path` |
 
-> 本版已冻结，后续仅接受实现驱动的变更。
+> v1.2 已冻结，后续仅接受实现驱动的变更。
 
 ---
 
@@ -68,7 +68,7 @@
 | `capture_status` | `face.jpg` | `audio.wav` | `coverage` | `sessions.status` | 进分析 | `error` | `warnings` |
 |---|---|---|---|---|---|---|---|
 | `ok` | 有 | 有 | `both` | `captured` | 是 | `null` | 空数组 |
-| `partial` | 至少一路 | 视分支而定 | `both` / `face_only` / `audio_only` | `captured` | 是（可能 `degraded`） | `null` | 非空 |
+| `partial` | 至少一路 | 视分支而定 | `both` / `face_only` / `audio_only` | `captured` | 是（`analysis_status` 可能为 `degraded`） | `null` | 非空 |
 | `no_face` | 无 | 有 | `audio_only` | `captured` | 是（仅音频路） | `null` | 含 `no_face` |
 | `no_audio` | 有 | 无 | `face_only` | `captured` | 是（仅表情路） | `null` | 含 `audio_too_short` |
 | `no_face_no_audio` | 无 | 无 | `null` | `failed` | 否 | `null` | 非空 |

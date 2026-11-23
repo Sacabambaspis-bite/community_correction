@@ -2,12 +2,12 @@
 
 | 项 | 值 |
 |---|---|
-| 契约版本 | `db@1.1` |
+| 契约版本 | `db@1.2` |
 | 所有者 | backend-engineer（`app/db/`） |
 | 引擎 | SQLite + SQLAlchemy 2.x + Alembic |
 | 关联 | [capture.md](./capture.md)、[api.md](./api.md)、[analysis.schema.json](./analysis.schema.json) |
 
-> 本版已冻结，后续仅接受实现驱动的变更。
+> v1.2 已冻结，后续仅接受实现驱动的变更。
 
 ---
 
@@ -79,47 +79,60 @@
 |---|---|---|---|
 | `id` | TEXT | PK | UUID v4 |
 | `subject_id` | TEXT | NOT NULL, FK → `subjects.id` | |
-| `status` | TEXT | NOT NULL, CHECK in (`created`,`captured`,`analyzed`,`failed`) | 见 3.1 |
+| `status` | TEXT | NOT NULL, CHECK in (`created`,`captured`,`failed`) | 只反映采集结果，不随分析变化；见 3.1 |
 | `capture_status` | TEXT | CHECK in (`ok`,`partial`,`no_face`,`no_audio`,`no_face_no_audio`,`error`) | 与 [capture.md](./capture.md) 枚举一致 |
 | `face_path` | TEXT | NULL | 相对路径 |
 | `audio_path` | TEXT | NULL | 相对路径 |
 | `transcript_path` | TEXT | NULL | 由 `analysis/asr` 写入 |
 | `duration_sec` | REAL | NULL | 录音实际时长 |
 | `captured_at` | TEXT | NULL | 采集完成时间 |
-| `analysis_status` | TEXT | CHECK in (`none`,`ok`,`degraded`,`failed`) | 默认 `none` |
+| `analysis_status` | TEXT | CHECK in (`pending`,`done`,`degraded`,`failed`) | 默认 `pending`；分析失败只改此字段，不回写 `status` |
 | `analysis_json` | TEXT | NULL, JSON | 通过 schema 校验的完整 `AnalysisResult` |
 | `codes` | TEXT | NULL, JSON | 结构化 code 数组：`error.code` 在前，其余来自 `warnings[].code`；不含堆栈 |
 | `created_at` | TEXT | NOT NULL | |
 | `updated_at` | TEXT | NOT NULL | |
 
-### 3.1 `status` 状态机
+### 3.1 `status` 状态机（仅采集）
 
 ```
-created ──capture 有可用产物───> captured ──analyze 成功──> analyzed
-   │                               │
-   ├──capture 无可用产物──────────> failed
-   └──analyze 失败────────────────> failed
+created ──capture 有可用产物──> captured
+   │
+   └──capture 无可用产物──────> failed
 ```
 
 | 迁移 | 触发 | 允许条件 |
 |---|---|---|
 | `created → captured` | `capture_status in (ok, partial, no_face, no_audio)` | `face_path` 或 `audio_path` 任一存在 |
 | `created → failed` | `capture_status in (no_face_no_audio, error)` | 无任何可用产物 |
-| `captured → analyzed` | 分析通过 schema 校验且分级完成 | `analysis_status in (ok, degraded)` |
-| `captured → failed` | 四路全部失败 | — |
+
+`sessions.status` **只反映采集结果**，分析过程不再改变该字段。
+
+`analysis_status` 状态机：
+
+```
+pending ──分析成功且无降级──> done
+   ├────任一路降级但结果可用──> degraded
+   └────分析彻底失败────────> failed
+```
+
+| 迁移 | 触发 |
+|---|---|
+| `pending → done` | 分析通过 schema 校验且无降级 |
+| `pending → degraded` | 任一路降级，结果仍可用 |
+| `pending → failed` | 分析彻底失败、结果不可用；**不回写** `sessions.status` |
 
 `capture_status` → `sessions.status` 映射：
 
 | `capture_status` | `sessions.status` | 是否进分析 |
 |---|---|---|
 | `ok` | `captured` | 是 |
-| `partial` | `captured` | 是（可能 `degraded`） |
+| `partial` | `captured` | 是（`analysis_status` 可能为 `degraded`） |
 | `no_face` | `captured` | 是（仅音频路） |
 | `no_audio` | `captured` | 是（仅表情路） |
 | `no_face_no_audio` | `failed` | 否 |
 | `error` | `failed` | 否 |
 
-> 判定规则：只要 `face_path` 或 `audio_path` 任一存在即可进入 `captured`，因此 `partial` / `no_face` / `no_audio` 均可被分析；失败会话保留 `meta.json` 便于排查，不进分析、不计入复盘、不生成工单（详见 [capture.md](./capture.md) 3.2）。
+> 判定规则：只要 `face_path` 或 `audio_path` 任一存在即可进入 `captured`，因此 `partial` / `no_face` / `no_audio` 均可被分析；失败会话保留 `meta.json` 便于排查，不进分析、不计入复盘、不生成工单（详见 [capture.md](./capture.md) 3.2）。分析失败只把 `analysis_status` 置 `failed`，`sessions.status` 保持 `captured`。
 
 ### 3.2 `analysis_json` 存放约定
 
@@ -144,7 +157,7 @@ created ──capture 有可用产物───> captured ──analyze 成功─
 | `manual_review` | INTEGER | NOT NULL, CHECK in (0,1) | 是否强制人工复核 |
 | `rules_fired` | TEXT | NOT NULL, JSON | 命中的规则编号数组 |
 | `evidence_json` | TEXT | NOT NULL, JSON | 证据链数组 |
-| `grading_version` | TEXT | NOT NULL | 如 `grading@1.1` |
+| `grading_version` | TEXT | NOT NULL | 如 `grading@1.2` |
 | `created_at` | TEXT | NOT NULL | |
 
 约束：
@@ -255,7 +268,7 @@ pending ──confirm──> confirmed ──(自动)──> closed
 {
   "id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
   "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
-  "status": "analyzed",
+  "status": "captured",
   "capture_status": "ok",
   "face_path": "subjects/3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c/sessions/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f/face.jpg",
   "audio_path": "subjects/3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c/sessions/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f/audio.wav",

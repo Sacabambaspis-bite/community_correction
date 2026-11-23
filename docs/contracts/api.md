@@ -2,12 +2,12 @@
 
 | 项 | 值 |
 |---|---|
-| 契约版本 | `api@1.1` |
+| 契约版本 | `api@1.2` |
 | 所有者 | backend-engineer（`app/api/`） |
 | 基础路径 | `/api` |
 | 关联 | [db.md](./db.md)、[capture.md](./capture.md)、[analysis.schema.json](./analysis.schema.json)、[ui.md](./ui.md) |
 
-> 本版已冻结，后续仅接受实现驱动的变更。
+> v1.2 已冻结，后续仅接受实现驱动的变更。
 
 ---
 
@@ -58,11 +58,11 @@ HTTP 状态码与 `code` 同时使用：业务错误返回 4xx 但 **`code` 才�
 | 1005 | 409 | 状态冲突 | 未同意就采集、未采集就分析、工单已关闭 |
 | 1006 | 429 | 频率限制 | 同一对象 60 秒内重复建会话 |
 | 2001 | 200 | 采集失败（无可用产物） | `sessions.status == failed`，业务仍返回 200 |
-| 2002 | 200 | 分析降级 | `analysis_status=degraded`，结果可用 |
+| 2003 | 200 | 分析失败（结果不可用） | `analysis_status=failed`，需重采或人工处理 |
 | 5000 | 500 | 内部错误 | 未捕获异常，`data=null` |
 
-> `2001` / `2002` 不视为 HTTP 错误，前端依据 `code` 决定展示哪种提示。
-> `partial` / `no_face` / `no_audio` 返回 `code=0` 且 `degraded=true`；只有 `sessions.status == failed` 才返回 `2001`。
+> `2001` / `2003` 不视为 HTTP 错误，前端依据 `code` 决定展示哪种提示。
+> `partial` / `no_face` / `no_audio` 返回 `code=0` 且 `degraded` 数组含 `"capture"`；只有 `sessions.status == failed` 才返回 `2001`。
 
 ## 4. 鉴权
 
@@ -187,6 +187,7 @@ curl -X POST http://localhost:8000/api/session \
     "duration_sec": 30.0,
     "face_available": true,
     "audio_available": true,
+    "degraded": [],
     "codes": []
   },
   "request_id": "req_01HF8Z4A1B"
@@ -203,7 +204,7 @@ curl -X POST http://localhost:8000/api/session \
     "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
     "status": "captured",
     "capture_status": "partial",
-    "degraded": true,
+    "degraded": ["capture"],
     "face_available": false,
     "audio_available": true,
     "codes": ["detector_unavailable"]
@@ -222,7 +223,7 @@ curl -X POST http://localhost:8000/api/session \
     "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
     "status": "failed",
     "capture_status": "error",
-    "degraded": false,
+    "degraded": [],
     "face_available": false,
     "audio_available": false,
     "codes": ["camera_unavailable"]
@@ -230,6 +231,19 @@ curl -X POST http://localhost:8000/api/session \
   "request_id": "req_01HF8Z4A1B"
 }
 ```
+
+`degraded` 字段说明：
+
+| 值 | 含义 |
+|---|---|
+| `[]` | 未降级 |
+| `["capture"]` | 采集降级（`capture_status in (partial, no_face, no_audio)`） |
+| `["analysis"]` | 分析降级（`analysis_status=degraded`，结果可用） |
+| `["capture","analysis"]` | 两者同时降级 |
+
+- 数组元素去重，固定顺序 `capture` → `analysis`；
+- 会话响应只可能含 `"capture"`，分析响应可含两者；
+- `analysis_status=failed` 不属于降级：返回 `2003`，`analysis` / `review` / `ticket` 均为 `null`。
 
 前置校验：
 
@@ -253,10 +267,10 @@ curl -X POST http://localhost:8000/api/session/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5
   "message": "ok",
   "data": {
     "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
-    "analysis_status": "ok",
+    "analysis_status": "done",
     "consistency": "medium",
     "needs_review": false,
-    "degraded": false,
+    "degraded": [],
     "analysis": { "schema_version": "1.0", "channels": { "...": "..." } },
     "review": {
       "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b1c",
@@ -278,7 +292,8 @@ curl -X POST http://localhost:8000/api/session/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5
 
 - `session.status != captured` → `1005`；
 - 重复调用返回首次结果，不重复建单；
-- 绿结果时 `ticket` 为 `null`；**例外**：`degraded=true` 且最终色为绿时按 `R_DEGRADED_REVIEW` 建 `P1` 单（见 [../grading.md](../grading.md#6-复核触发条件)）；若会话为采集 `partial` / 单模态，按规则 8 取 `P0`。
+- `analysis_status=failed` → `code=2003`，`analysis` / `review` / `ticket` 均为 `null`；
+- 绿结果时 `ticket` 为 `null`；**例外**：`degraded` 含 `"analysis"` 且最终色为绿时按 `R_DEGRADED_REVIEW` 建 `P1` 单（见 [../grading.md](../grading.md#6-复核触发条件)）；若会话为采集 `partial` / 单模态，按规则 8 取 `P0`。
 
 ### 7.4 `GET /api/session/{session_id}/feedback`（用户端）
 
@@ -293,7 +308,7 @@ curl http://localhost:8000/api/session/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f/feed
   "message": "ok",
   "data": {
     "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
-    "status": "analyzed",
+    "status": "captured",
     "summary_text": "本次记录已完成。",
     "suggestion": "keep_routine",
     "next_action": "下次按约定时间再来即可"
