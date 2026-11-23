@@ -3,3 +3,4 @@ uvicorn>=0.30
 SQLAlchemy>=2.0,<2.1
 pydantic>=2.0
 pytest>=8.0
+jsonschema[format]>=4.23,<5
