@@ -92,6 +92,8 @@
 | `created_at` | TEXT | NOT NULL | |
 | `updated_at` | TEXT | NOT NULL | |
 
+> `coverage` 为派生值（由 `face_path` / `audio_path` 推导），不落列；读取时由 `CaptureSession.coverage` 属性计算。
+
 ### 3.1 `status` 状态机（仅采集）
 
 ```
@@ -149,7 +151,7 @@ pending ──分析成功且无降级──> done
 | `source_session_id` | TEXT | NULL, FK → `sessions.id` | 触发本次复盘的单次会话 |
 | `window_start` | TEXT | NOT NULL | 窗口起始（含） |
 | `window_end` | TEXT | NOT NULL | 窗口结束（含） |
-| `window_days` | INTEGER | NOT NULL | 默认 7 |
+| `window_days` | INTEGER | NOT NULL, DEFAULT 7 | 窗口天数 |
 | `single_session_risk` | TEXT | NOT NULL, CHECK in (`red`,`orange`,`none`) | 单次规则结果 |
 | `trend_color` | TEXT | NOT NULL, CHECK in (`green`,`blue`,`yellow`) | 趋势规则结果 |
 | `final_color` | TEXT | NOT NULL, CHECK in (`green`,`blue`,`yellow`,`orange`,`red`) | 合成结果 |

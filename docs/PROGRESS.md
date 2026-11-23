@@ -79,6 +79,10 @@
 - `POST /api/sessions` 的 consent 前置校验（`1005 consent_required` / `consent_revoked`）；
 - `subject` token 的会话归属校验（只能访问本人 session，越权返回 `1003`）。
 
+**演示数据说明**
+
+- `scripts/seed_demo.py` 生成的 `face.jpg` 为 300×300 纯灰底 + 居中几何剪影 + 底部 `placeholder` 字样的**占位素材**，`transcript.txt` 为一行为「（占位文本，演示数据）」的占位文本；二者均非真实采集，不得用于效果评估或对外宣称。
+
 **阻塞 / 风险**
 
 1. **麦克风音量**：本机默认输入曾长期近乎静音（峰值 7/32768、`speech_ratio=0`），导致 `audio_too_short`；最后一次正式验证为 `ok`（`speech_ratio=0.3153`），说明设备可用但音量偏低，现场部署前需复核输入设备与增益。
