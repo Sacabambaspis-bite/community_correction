@@ -56,7 +56,7 @@ SOLO 模式下输入 `/` 选 **Plan**，然后发：
 ```
 
 ```
-使用 backend-engineer，按 docs/contracts/db.md 建 subjects / sessions / reviews / review_tickets 四张表，并实现 POST /api/session。
+使用 backend-engineer，按 docs/contracts/db.md 建 subjects / sessions / reviews / review_tickets / audit_logs 五张表，并实现 POST /api/sessions。
 ```
 
 ```
@@ -95,7 +95,7 @@ SOLO 模式下输入 `/` 选 **Plan**，然后发：
 | capture-engineer | `app/capture/`, `tests/test_capture/` |
 | analysis-engineer | `app/analysis/`, `tests/test_analysis/` |
 | grading-engineer | `app/grading/`, `tests/test_grading/` |
-| backend-engineer | `app/api/`, `app/db/`, `tests/test_api/` |
+| backend-engineer | `app/api/`, `app/db/`, `tests/test_api/`, `tests/test_db/` |
 | fe-user | `web/src/user/` |
 | fe-admin | `web/src/admin/` |
 | qa-guard | `tests/`, `docs/reports/` |
