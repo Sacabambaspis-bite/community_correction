@@ -2,12 +2,12 @@
 
 | 项 | 值 |
 |---|---|
-| 契约版本 | `api@1.2` |
+| 契约版本 | `api@1.3` |
 | 所有者 | backend-engineer（`app/api/`） |
 | 基础路径 | `/api` |
 | 关联 | [db.md](./db.md)、[capture.md](./capture.md)、[analysis.schema.json](./analysis.schema.json)、[ui.md](./ui.md) |
 
-> v1.2 已冻结，后续仅接受实现驱动的变更。
+> v1.3 已冻结，后续仅接受实现驱动的变更。
 
 ---
 
@@ -291,6 +291,7 @@ curl -X POST http://localhost:8000/api/session/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5
 ```
 
 - `session.status != captured` → `1005`；
+- `session.status == created` 表示采集尚未完成，不可进入分析（返回 `1005`），也不计入复盘；
 - 重复调用返回首次结果，不重复建单；
 - `analysis_status=failed` → `code=2003`，`analysis` / `review` / `ticket` 均为 `null`；
 - 绿结果时 `ticket` 为 `null`；**例外**：`degraded` 含 `"analysis"` 且最终色为绿时按 `R_DEGRADED_REVIEW` 建 `P1` 单（见 [../grading.md](../grading.md#6-复核触发条件)）；若会话为采集 `partial` / 单模态，按规则 8 取 `P0`。

@@ -2,12 +2,12 @@
 
 | 项 | 值 |
 |---|---|
-| 契约版本 | `db@1.2` |
+| 契约版本 | `db@1.3` |
 | 所有者 | backend-engineer（`app/db/`） |
-| 引擎 | SQLite + SQLAlchemy 2.x + Alembic |
+| 引擎 | SQLite + SQLAlchemy 2.x（原型阶段手工迁移，正式部署前引入 Alembic） |
 | 关联 | [capture.md](./capture.md)、[api.md](./api.md)、[analysis.schema.json](./analysis.schema.json) |
 
-> v1.2 已冻结，后续仅接受实现驱动的变更。
+> v1.3 已冻结，后续仅接受实现驱动的变更。
 
 ---
 
@@ -31,9 +31,9 @@
 | `id` | TEXT | PK | UUID v4 |
 | `code` | TEXT | NOT NULL, UNIQUE | 矫正编号，如 `S001` |
 | `name` | TEXT | NOT NULL | 姓名 |
-| `gender` | TEXT | NULL, CHECK in (`male`,`female`,`unknown`) | 默认 `unknown` |
+| `gender` | TEXT | NULL, DEFAULT `'unknown'`, CHECK in (`male`,`female`,`unknown`) | |
 | `birth_year` | INTEGER | NULL | 仅年份，不存完整生日 |
-| `status` | TEXT | NOT NULL, CHECK in (`active`,`suspended`,`closed`) | 默认 `active` |
+| `status` | TEXT | NOT NULL, DEFAULT `'active'`, CHECK in (`active`,`suspended`,`closed`) | |
 | `consent_json` | TEXT | NULL, JSON | 同意状态，结构见 2.1 |
 | `baseline_json` | TEXT | NULL, JSON | 个人基线，结构见 2.2 |
 | `created_at` | TEXT | NOT NULL | |
@@ -86,7 +86,7 @@
 | `transcript_path` | TEXT | NULL | 由 `analysis/asr` 写入 |
 | `duration_sec` | REAL | NULL | 录音实际时长 |
 | `captured_at` | TEXT | NULL | 采集完成时间 |
-| `analysis_status` | TEXT | CHECK in (`pending`,`done`,`degraded`,`failed`) | 默认 `pending`；分析失败只改此字段，不回写 `status` |
+| `analysis_status` | TEXT | NOT NULL, DEFAULT `'pending'`, CHECK in (`pending`,`done`,`degraded`,`failed`) | 分析失败只改此字段，不回写 `status` |
 | `analysis_json` | TEXT | NULL, JSON | 通过 schema 校验的完整 `AnalysisResult` |
 | `codes` | TEXT | NULL, JSON | 结构化 code 数组：`error.code` 在前，其余来自 `warnings[].code`；不含堆栈 |
 | `created_at` | TEXT | NOT NULL | |
@@ -164,7 +164,8 @@ pending ──分析成功且无降级──> done
 
 - `trend_color` 的枚举不含 `orange` / `red`：趋势规则本身只产出绿/蓝/黄，橙与红只来自单次规则或合成封顶；
 - `single_session_risk=none` 表示单次规则未命中；
-- `final_color != green` 必须存在对应 `review_tickets` 记录（由 `api` 层在同一事务保证）。
+- `final_color != green` 必须存在对应 `review_tickets` 记录（由 `api` 层在同一事务保证）；
+- 同一对象的同一 `window_end` 只允许一条复盘记录（`UNIQUE(subject_id, window_end)`），防止同一窗口重复生成。
 
 ## 5. `review_tickets`（复核工单）
 
@@ -256,6 +257,7 @@ pending ──confirm──> confirmed ──(自动)──> closed
 | `sessions` | `(status)` | 失败会话巡检 |
 | `reviews` | `(subject_id, created_at DESC)` | 对象复盘历史 |
 | `reviews` | `(final_color)` | 看板色码分布 |
+| `reviews` | `UNIQUE(subject_id, window_end)` | 同一窗口防重复生成 |
 | `review_tickets` | `(status, priority, opened_at DESC)` | 复核队列排序 |
 | `review_tickets` | `(subject_id)` | 对象工单 |
 | `review_tickets` | `UNIQUE(review_id)` | 一次复盘只开一张单，保证幂等 |
@@ -285,10 +287,12 @@ pending ──confirm──> confirmed ──(自动)──> closed
 
 ## 9. 迁移约定
 
-1. 迁移文件放在 `app/db/migrations/`，命名 `YYYYMMDDHHMM_<slug>.py`；
+> 原型阶段手工迁移（`python -m app.db.init` 建表 + 手工迁移脚本），正式部署前引入 Alembic。
+
+1. 迁移文件放在 `app/db/migrations/`，命名 `YYYYMMDDHHMM_<slug>.py`（引入 Alembic 后作为 revision 文件）；
 2. **只新增迁移，不改历史迁移**；
 3. 破坏性变更（删列、改类型）必须同时提供：新列 + 回填脚本 + 兼容期说明；
-4. 每个迁移必须可在空库上从头 `upgrade head` 成功；
+4. 每个迁移必须可在空库上从头执行成功（引入 Alembic 后即 `upgrade head`）；
 5. SQLite 不支持 `ALTER COLUMN`，改列用"建新表 → 拷数据 → 换名"；
 6. 枚举新增值属于兼容变更，但必须同步更新本契约文档。
 
