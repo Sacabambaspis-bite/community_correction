@@ -1,0 +1,16 @@
+# 数据库迁移约定
+
+本目录当前为空，本轮只提供 `Base.metadata.create_all()` 建库（`python -m app.db.init`），
+未引入 Alembic 运行时。后续 schema 变化按以下规则补充迁移文件。
+
+## 规则
+
+1. **只增不改**：已有迁移文件视为不可变历史，修正只能新增迁移。
+2. **命名**：`YYYYMMDDHHMM_<slug>.py`，例如 `202612011030_add_sessions_review_flag.py`。
+3. **空库可建**：每个迁移必须能在空库上从头 `upgrade head` 成功。
+4. **SQLite 改列**：SQLite 不支持 `ALTER COLUMN`，一律用「建新表 → 拷贝数据 → 换名」，
+   并保留原索引与 CHECK 约束。
+5. **枚举扩容**：属于兼容变更，但必须在同一提交内同步更新
+   `docs/contracts/db.md`（由契约负责人执行），代码侧枚举与 CHECK 取值保持一致。
+6. **破坏性变更**：删列 / 改类型必须同时提供新列、回填脚本与兼容期说明，
+   且不得修改历史迁移。
