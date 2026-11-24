@@ -11,6 +11,7 @@ import { RequireConsent, RequireStaff } from "./lib/guards";
 import CapturePage from "./user/Capture/CapturePage";
 import CaptureTasksPage from "./user/Capture/CaptureTasksPage";
 import CheckinPage from "./user/Checkin/CheckinPage";
+import ComingSoonPage from "./user/ComingSoon/ComingSoonPage";
 import ConsentPage from "./user/Consent/ConsentPage";
 import FeedbackPage from "./user/Feedback/FeedbackPage";
 
@@ -42,6 +43,14 @@ export default function App() {
           element={
             <RequireConsent>
               <CapturePage />
+            </RequireConsent>
+          }
+        />
+        <Route
+          path="/pending"
+          element={
+            <RequireConsent>
+              <ComingSoonPage />
             </RequireConsent>
           }
         />

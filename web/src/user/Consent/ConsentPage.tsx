@@ -52,7 +52,6 @@ export default function ConsentPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState(false);
   const [revoking, setRevoking] = useState(false);
   const [confirmingRevoke, setConfirmingRevoke] = useState(false);
   const [revokeError, setRevokeError] = useState<string | null>(null);
@@ -84,27 +83,31 @@ export default function ConsentPage() {
     void loadConsent();
   }, [loadConsent]);
 
-  const handleSubmit = useCallback(async (value: ConsentFormValue) => {
-    setSubmitting(true);
-    setFormError(null);
-    try {
-      const envelope = await putConsent(value);
-      if (envelope.code !== 0 || envelope.data === null) {
-        setFormError(errorText(envelope.code, envelope.message));
-        return;
+  const handleSubmit = useCallback(
+    async (value: ConsentFormValue) => {
+      setSubmitting(true);
+      setFormError(null);
+      try {
+        const envelope = await putConsent(value);
+        if (envelope.code !== 0 || envelope.data === null) {
+          setFormError(errorText(envelope.code, envelope.message));
+          return;
+        }
+        setConsent(envelope.data);
+        // 同意提交成功后直接进入数据采集页，不设中间引导步骤（ui@1.2 补记 5）。
+        navigate("/capture", { replace: true });
+      } catch (error) {
+        setFormError(
+          error instanceof ApiError
+            ? errorText(error.code, error.message)
+            : "网络异常，请检查连接后重试。",
+        );
+      } finally {
+        setSubmitting(false);
       }
-      setConsent(envelope.data);
-      setSubmitted(true);
-    } catch (error) {
-      setFormError(
-        error instanceof ApiError
-          ? errorText(error.code, error.message)
-          : "网络异常，请检查连接后重试。",
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  }, []);
+    },
+    [navigate],
+  );
 
   const handleRevoke = useCallback(async () => {
     setRevoking(true);
@@ -116,7 +119,6 @@ export default function ConsentPage() {
         return;
       }
       setConsent(envelope.data);
-      setSubmitted(false);
       setConfirmingRevoke(false);
     } catch (error) {
       setRevokeError(
@@ -188,26 +190,11 @@ export default function ConsentPage() {
 
           <section className={styles.card}>
             <h2 className={styles.cardTitle}>提交或更新同意</h2>
-            {submitted ? (
-              <div className={styles.successBox} role="status">
-                <p>同意已提交，可以开始采集。</p>
-                <div className={styles.buttonRow}>
-                  <button
-                    type="button"
-                    className={styles.primaryButton}
-                    onClick={() => navigate("/capture")}
-                  >
-                    进入采集引导
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <ConsentForm
-                submitting={submitting}
-                error={formError}
-                onSubmit={(value) => void handleSubmit(value)}
-              />
-            )}
+            <ConsentForm
+              submitting={submitting}
+              error={formError}
+              onSubmit={(value) => void handleSubmit(value)}
+            />
           </section>
 
           <section className={styles.card}>

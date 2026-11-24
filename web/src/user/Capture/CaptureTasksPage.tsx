@@ -36,6 +36,39 @@ const TASK_MODULES: Array<{
   },
 ];
 
+/**
+ * 更多服务入口（ui@1.2 补记 5）。
+ * 当前阶段仅跳转「功能待开发」占位页，不对接后端、不实现业务逻辑。
+ *
+ * TODO(可扩展)：AI援助模块后续可扩展三类服务能力——
+ *   1) 心理援助：情绪疏导、心理测评与转介；
+ *   2) 法律援助：法律咨询、文书指引与援助申请；
+ *   3) 就业帮扶：岗位推荐、技能培训与就业指导。
+ * 届时在此拆分为独立入口与独立页面，复用本页卡片样式，不改变现有签到/汇报流程。
+ */
+const EXTRA_MODULES: Array<{
+  key: string;
+  title: string;
+  description: string;
+  to: string;
+  action: string;
+}> = [
+  {
+    key: "ai-aid",
+    title: "AI援助",
+    description: "获取心理援助、法律援助与就业帮扶等支持。",
+    to: "/pending?feature=ai-aid",
+    action: "了解详情",
+  },
+  {
+    key: "education",
+    title: "教育学习",
+    description: "参与法治教育、思想教育与线上学习任务。",
+    to: "/pending?feature=education",
+    action: "了解详情",
+  },
+];
+
 function formatDateTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -119,6 +152,19 @@ export default function CaptureTasksPage() {
       {!loading && !error && !tasks ? (
         <EmptyState text="任务信息暂不可用，请稍后重试。" />
       ) : null}
+
+      <section className={styles.extraSection}>
+        <h2 className={styles.sectionTitle}>更多服务</h2>
+        <div className={styles.taskGrid}>
+          {EXTRA_MODULES.map((module) => (
+            <Link key={module.key} className={styles.taskCard} to={module.to}>
+              <h2 className={styles.taskCardTitle}>{module.title}</h2>
+              <p className={styles.taskDescription}>{module.description}</p>
+              <span className={styles.taskAction}>{module.action} →</span>
+            </Link>
+          ))}
+        </div>
+      </section>
 
       <p className={styles.footerHint}>
         <Link to="/consent">查看或撤回知情同意</Link>

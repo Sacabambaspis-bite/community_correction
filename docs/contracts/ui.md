@@ -17,6 +17,13 @@
 
 > **v1.2 实现补记 4（2026-11-24，附加、非破坏）**：§3.2 思想汇报录音改为**手动控制**——「开始录音」启动、`结束录音` 终止并保存（调 `POST /api/sessions/{id}/stop`，api@1.5 补记·三）；**删除倒计时**，录音中仅显示红点状态标识与正计时时长（mm:ss）；不存在自动终止；保存、轮询、结果反馈逻辑不变。
 
+> **v1.2 实现补记 5（2026-11-24，附加、非破坏）**：
+> 1. **同意后直达采集页**：`PUT /api/user/consent` 成功即跳转 `/capture`（`replace`），取消原「进入采集引导」确认按钮与成功提示框，链路为 `/consent → /capture`，不设中间节点。
+> 2. **§3.4 模块选择页新增两个入口**：`AI援助`、`教育学习`（与签到/汇报卡片同款样式、同栅格响应式），位于「更多服务」分区，不依赖 `/api/user/tasks` 数据。
+> 3. **统一占位跳转**：两入口均跳 `/pending?feature=ai-aid|education`，展示「功能待开发」，提供返回事项选择；当前不对接后端、不实现业务逻辑。
+> 4. **AI援助扩展位**：代码注释标注后续可扩展「心理援助 / 法律援助 / 就业帮扶」三类能力，届时拆分为独立入口与页面，不改变现有签到/汇报流程。
+> 5. 用户端仍禁止出现色码/危机/分值字样；占位页文案仅中性提示。
+
 ---
 
 ## 1. 技术约定
@@ -40,6 +47,7 @@
 | user | `/capture` | 模块选择页（签到 / 思想汇报） | `web/src/user/Capture/` |
 | user | `/capture/checkin` | 刷脸签到子页（face_only） | `web/src/user/Checkin/` |
 | user | `/capture/report` | 思想汇报子页（face+audio，原采集引导页） | `web/src/user/Capture/` |
+| user | `/pending` | 功能待开发提示页（`?feature=ai-aid\|education`） | `web/src/user/ComingSoon/` |
 | user | `/feedback/:sessionId` | 结果反馈页 | `web/src/user/Feedback/` |
 | admin | `/admin/subjects` | 对象列表 | `web/src/admin/Subjects/` |
 | admin | `/admin/subjects/:subjectId` | 对象详情 + 记录检索 | `web/src/admin/SubjectDetail/` |
