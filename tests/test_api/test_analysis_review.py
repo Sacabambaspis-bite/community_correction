@@ -345,6 +345,7 @@ def test_tickets_list_detail_transition_and_closed_guard(
     item = listing["data"]["items"][0]
     assert item["subject_name"] == "张某某"
     assert item["final_color"] == review["final_color"]
+    assert item["detail_json"] is None
     assert set(item) == {
         "ticket_id",
         "subject_id",
@@ -355,6 +356,7 @@ def test_tickets_list_detail_transition_and_closed_guard(
         "opened_at",
         "due_at",
         "status",
+        "detail_json",
     }
 
     invalid = client.get(
@@ -398,6 +400,7 @@ def test_tickets_list_detail_transition_and_closed_guard(
     assert detail["code"] == 0
     assert detail["data"]["rules_fired"] == review["rules_fired"]
     assert detail["data"]["suggested_method"]
+    assert detail["data"]["detail_json"] is None
     assert [entry["action"] for entry in detail["data"]["history"]] == [
         "opened",
         "correct",
@@ -453,7 +456,8 @@ def test_dashboard_defaults_to_latest_captured_subject(
         "red",
     }
     assert sum(data["color_distribution"].values()) == 1
-    assert data["pending_tickets"] == 1
+    # 复盘工单与惰性生成的 checkin 逾期工单均处于 pending。
+    assert data["pending_tickets"] == 2
     assert data["last_session_at"] == _CAPTURED_AT
 
 

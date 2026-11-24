@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import threading
 import wave
 
 from .config import SPEECH_FRAME_MS, SPEECH_RMS_THRESHOLD
@@ -20,13 +21,21 @@ def _encode_wav(pcm, sample_rate: int, channels: int) -> bytes:
 
 
 def record_audio(
-    duration_sec: float = 30.0,
+    duration_sec: float | None = 30.0,
     sample_rate: int = 16000,
     channels: int = 1,
     mic_index: int = 0,
     min_speech_ratio: float = 0.05,
+    stop_event: threading.Event | None = None,
 ) -> AudioResult:
-    """录制指定时长音频并计算有效语音占比。"""
+    """定时或手动录制音频，并计算有效语音占比。
+
+    手动模式（``duration_sec is None``）只由 ``stop_event`` 结束；
+    分块大小仅控制读取粒度，不承担超时或自动终止语义。
+    """
+    if duration_sec is None and stop_event is None:
+        raise ValueError("stop_event is required when duration_sec is None")
+
     try:
         import numpy as np
         import sounddevice as sd
@@ -34,10 +43,20 @@ def record_audio(
         return AudioResult(status="error", reason="sounddevice_unavailable")
 
     try:
-        total_frames = int(float(duration_sec) * int(sample_rate))
+        sample_rate = int(sample_rate)
+        channels = int(channels)
+        total_frames = (
+            None
+            if duration_sec is None
+            else int(float(duration_sec) * sample_rate)
+        )
     except Exception:
         return AudioResult(status="error", reason="audio_record_failed")
-    if total_frames <= 0 or int(sample_rate) <= 0 or int(channels) <= 0:
+    if (
+        sample_rate <= 0
+        or channels <= 0
+        or (total_frames is not None and total_frames <= 0)
+    ):
         return AudioResult(status="error", reason="audio_record_failed")
 
     # 先校验输入设备，设备不存在/不可用时记 audio_device_unavailable
@@ -46,23 +65,51 @@ def record_audio(
         if checker is not None:
             checker(
                 device=mic_index,
-                samplerate=int(sample_rate),
-                channels=int(channels),
+                samplerate=sample_rate,
+                channels=channels,
             )
     except Exception:
         return AudioResult(status="error", reason="audio_device_unavailable")
 
-    try:
-        data = sd.rec(
-            total_frames,
-            samplerate=int(sample_rate),
-            channels=int(channels),
-            dtype="int16",
-            device=mic_index,
+    if duration_sec is None:
+        chunks = []
+        # 100ms 一块，置位后最多在当前块读取结束时收尾，不设置任何超时。
+        blocksize = max(int(sample_rate * 0.1), 1)
+        try:
+            with sd.InputStream(
+                samplerate=sample_rate,
+                channels=channels,
+                dtype="int16",
+                device=mic_index,
+                blocksize=blocksize,
+            ) as stream:
+                while not stop_event.is_set():
+                    block, _overflowed = stream.read(blocksize)
+                    block = np.asarray(block)
+                    if block.size:
+                        chunks.append(block.copy())
+                    if stop_event.is_set():
+                        break
+        except Exception:
+            return AudioResult(status="error", reason="audio_record_failed")
+
+        data = (
+            np.concatenate(chunks, axis=0)
+            if chunks
+            else np.empty((0, channels), dtype=np.int16)
         )
-        sd.wait()
-    except Exception:
-        return AudioResult(status="error", reason="audio_record_failed")
+    else:
+        try:
+            data = sd.rec(
+                total_frames,
+                samplerate=sample_rate,
+                channels=channels,
+                dtype="int16",
+                device=mic_index,
+            )
+            sd.wait()
+        except Exception:
+            return AudioResult(status="error", reason="audio_record_failed")
 
     if data is None:
         return AudioResult(status="error", reason="audio_record_failed")
@@ -77,7 +124,7 @@ def record_audio(
     duration = round(float(mono.shape[0]) / float(sample_rate), 3)
 
     # 按 30ms 一帧计算 RMS，归一化后高于阈值视为有效语音帧
-    frame_length = max(int(int(sample_rate) * SPEECH_FRAME_MS / 1000), 1)
+    frame_length = max(int(sample_rate * SPEECH_FRAME_MS / 1000), 1)
     total_windows = mono.shape[0] // frame_length
     if total_windows <= 0:
         speech_ratio = 0.0

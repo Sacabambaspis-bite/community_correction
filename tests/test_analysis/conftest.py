@@ -11,6 +11,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.analysis.models import AnalysisInput, ProviderInput
 from app.analysis.pipeline import run_analysis
 
+@pytest.fixture(autouse=True)
+def clear_sensevoice_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """测试一律不读真实 SenseVoice 配置，禁止任何公网调用。"""
+    monkeypatch.delenv("SENSEVOICE_API_URL", raising=False)
+    monkeypatch.delenv("SENSEVOICE_API_KEY", raising=False)
+
+
 SESSION_ID = "a0000000-0000-0000-0000-000000000001"
 SUBJECT_ID = "a0000000-0000-0000-0000-000000000002"
 FIXED_NOW = datetime(2026, 11, 24, 10, 0, tzinfo=timezone(timedelta(hours=8)))

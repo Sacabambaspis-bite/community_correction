@@ -15,6 +15,7 @@ AUDIT_ACTIONS: tuple[str, ...] = (
     "ticket.transition",
     "subject.update",
     "review.create",
+    "frequency.update",
 )
 
 #: `review_tickets.suggested_method` 的合法取值（db.md §5.2）。
@@ -24,4 +25,5 @@ SUGGESTED_METHODS: tuple[str, ...] = (
     "priority_interview",
     "urgent_escalation",
     "recapture",
+    "talk_to_staff",
 )

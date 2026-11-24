@@ -43,6 +43,12 @@ class Subject(Base):
     )
     consent_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     baseline_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    checkin_interval_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    report_interval_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=3, server_default="3"
+    )
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -63,6 +69,12 @@ class Subject(Base):
             "baseline_json IS NULL OR json_valid(baseline_json)",
             name="ck_subjects_baseline_json",
         ),
+        CheckConstraint(
+            "checkin_interval_days >= 1", name="ck_subjects_checkin_interval_days"
+        ),
+        CheckConstraint(
+            "report_interval_days >= 1", name="ck_subjects_report_interval_days"
+        ),
         Index("ix_subjects_status", "status"),
     )
 
@@ -79,6 +91,9 @@ class CaptureSession(Base):
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     subject_id: Mapped[str] = mapped_column(
         Text, ForeignKey("subjects.id"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(
+        Text, nullable=False, default="report", server_default="report"
     )
     status: Mapped[str] = mapped_column(Text, nullable=False)
     capture_status: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -98,6 +113,10 @@ class CaptureSession(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
     __table_args__ = (
+        CheckConstraint(
+            "kind IN ('checkin','report')",
+            name="ck_sessions_kind",
+        ),
         CheckConstraint(
             "status IN ('created','captured','failed')",
             name="ck_sessions_status",
@@ -119,6 +138,12 @@ class CaptureSession(Base):
         Index(
             "ix_sessions_subject_captured_at",
             "subject_id",
+            desc("captured_at"),
+        ),
+        Index(
+            "ix_sessions_subject_kind_captured_at",
+            "subject_id",
+            "kind",
             desc("captured_at"),
         ),
         Index("ix_sessions_status", "status"),
@@ -212,8 +237,8 @@ class ReviewTicket(Base):
     __tablename__ = "review_tickets"
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
-    review_id: Mapped[str] = mapped_column(
-        Text, ForeignKey("reviews.id"), nullable=False, unique=True
+    review_id: Mapped[Optional[str]] = mapped_column(
+        Text, ForeignKey("reviews.id"), nullable=True, unique=True
     )
     subject_id: Mapped[str] = mapped_column(
         Text, ForeignKey("subjects.id"), nullable=False
@@ -223,6 +248,8 @@ class ReviewTicket(Base):
     due_at: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     triggered_rules: Mapped[str] = mapped_column(Text, nullable=False)
     evidence_json: Mapped[str] = mapped_column(Text, nullable=False)
+    # 无复盘关联的逾期工单在此记录 overdue_kind / overdue_days。
+    detail_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # db.md §5.2 列出取值但未标 CHECK，因此不加 CHECK。
     suggested_method: Mapped[str] = mapped_column(Text, nullable=False)
     assignee: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -249,6 +276,10 @@ class ReviewTicket(Base):
         ),
         CheckConstraint(
             "json_valid(evidence_json)", name="ck_review_tickets_evidence_json"
+        ),
+        CheckConstraint(
+            "detail_json IS NULL OR json_valid(detail_json)",
+            name="ck_review_tickets_detail_json",
         ),
         Index(
             "ix_review_tickets_status_priority_opened_at",

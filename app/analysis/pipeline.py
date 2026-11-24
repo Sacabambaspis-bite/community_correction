@@ -19,7 +19,7 @@ from app.analysis.paths import (
     session_directory,
     transcript_relative_path,
 )
-from app.analysis.providers import BaseProvider, build_mock_providers, get_scenario
+from app.analysis.providers import BaseProvider, build_providers, get_scenario
 from app.analysis.schema import validate_channel, validate_result
 from app.grading.config import map_risk_level
 
@@ -90,7 +90,7 @@ def _validate_identity(value: str) -> bool:
     return str(parsed) == value.lower()
 
 
-def _validate_input(input: AnalysisInput) -> Path:
+def _validate_input(input: AnalysisInput, *, kind: str = "report") -> Path:
     if not _validate_identity(input.session_id) or not _validate_identity(
         input.subject_id
     ):
@@ -118,6 +118,8 @@ def _validate_input(input: AnalysisInput) -> Path:
         "no_audio": "face_only",
     }
     expected = expected_status_coverage.get(input.capture_status)
+    if kind == "checkin" and input.capture_status == "ok":
+        expected = "face_only"
     if expected is not None and input.coverage != expected:
         raise AnalysisInputError("capture_coverage_mismatch")
 
@@ -249,11 +251,21 @@ def _summary(
     return scenario["summary"]
 
 
-def _assert_invariants(result: dict[str, Any]) -> None:
-    channels = result["channels"]
-    degraded = any(
-        channel["status"] in {"degraded", "skipped"} for channel in channels.values()
+def _is_degraded(
+    channels: dict[str, dict[str, Any]], *, kind: str = "report"
+) -> bool:
+    relevant_channels = (
+        (channels["face"],) if kind == "checkin" else channels.values()
     )
+    return any(
+        channel["status"] in {"degraded", "skipped"}
+        for channel in relevant_channels
+    )
+
+
+def _assert_invariants(result: dict[str, Any], *, kind: str = "report") -> None:
+    channels = result["channels"]
+    degraded = _is_degraded(channels, kind=kind)
     if result["degraded"] != degraded:
         raise AnalysisSchemaError("analysis_invariant_failed:degraded")
     expected_review = result["consistency"] == "low" or degraded
@@ -278,17 +290,21 @@ def run_analysis(
     result_validator: Callable[[dict[str, Any]], None] = validate_result,
     clock: Callable[[], datetime] | None = None,
     monotonic: Callable[[], float] | None = None,
+    kind: str = "report",
 ) -> AnalysisRunResult:
-    """执行四路分析；任何 failed 包装都不会携带可进入 grading 的结果。"""
+    """执行四路分析；任何 failed 包装都不会携带可进入 grading 的结果。
+
+    checkin 的预期音频缺口不造成分析降级。
+    """
     time_source = clock or (lambda: datetime.now().astimezone())
     monotonic_source = monotonic or time.monotonic
     started_monotonic = monotonic_source()
 
     try:
-        root = _validate_input(input)
+        root = _validate_input(input, kind=kind)
         scenario_name = scenario or get_mock_scenario()
         scenario_data = get_scenario(scenario_name)
-        registry = providers or build_mock_providers(scenario_name)
+        registry = providers or build_providers(scenario_name)
         registry = {
             name: registry.get(name) or _missing_provider(name)
             for name in _CHANNEL_NAMES
@@ -352,7 +368,11 @@ def run_analysis(
                 "psych", psych_provider, psych_input
             )
 
-        if not any(_usable_output(channel) for channel in channels.values()):
+        if not any(_usable_output(channel) for channel in channels.values()) and not (
+            kind == "checkin"
+            and input.face_path
+            and channels["face"]["status"] in {"degraded", "skipped"}
+        ):
             return _failed("no_usable_channel_output")
 
         psych_available = _usable_output(channels["psych"])
@@ -363,11 +383,9 @@ def run_analysis(
             channels=channels,
             text_valence=text_valence,
             confidence_threshold=CONFIDENCE_THRESHOLD,
+            kind=kind,
         )
-        degraded = any(
-            channel["status"] in {"degraded", "skipped"}
-            for channel in channels.values()
-        )
+        degraded = _is_degraded(channels, kind=kind)
         needs_review = consistency == "low" or degraded
         risk_generator = overall_risk_level_generator or generate_overall_risk_level
         psych_output = channels["psych"]["output"] if psych_available else None
@@ -377,7 +395,10 @@ def run_analysis(
         overall = {
             "text_valence": text_valence,
             "text_signal": psych_output["signal_strength"] if psych_output else 0.0,
-            "risk_level": risk_generator(text_valence, intent_flag),
+            "risk_level": risk_generator(
+                0.0 if kind == "checkin" else text_valence,
+                "none" if kind == "checkin" else intent_flag,
+            ),
             "summary_signal": _summary(
                 scenario_data,
                 channels,
@@ -406,7 +427,7 @@ def run_analysis(
                 0, int(round((finished_monotonic - started_monotonic) * 1000))
             ),
         }
-        _assert_invariants(result)
+        _assert_invariants(result, kind=kind)
         result_validator(result)
         status = "degraded" if degraded else "done"
         return AnalysisRunResult(analysis_status=status, result=result, error=None)

@@ -10,18 +10,22 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple, Union
 
-from .audio import record_audio
+from .audio import _encode_wav, record_audio
 from .camera import capture_frame
 from .config import (
     CROP_MARGIN,
     DEFAULT_MIN_SPEECH_RATIO,
     JPEG_QUALITY,
     OUTPUT_SIDE,
+    SPEECH_FRAME_MS,
 )
 from .face import crop_face, detect_face
 from .models import AudioResult, CaptureResult, FaceResult, FrameResult
@@ -101,6 +105,7 @@ class _State:
     face_written: bool = False
     audio_written: bool = False
     face_meta: Optional[dict] = None
+    face_only: bool = False
 
 
 def _add_issue(state: _State, code: str, detail=None) -> None:
@@ -182,7 +187,18 @@ def _compute(state: _State):
     artifact_count = int(state.face_written) + int(state.audio_written)
     error_code: Optional[str] = None
 
-    if artifact_count == 0:
+    if state.face_only:
+        if state.face_written:
+            # face_only 的正常完成态；音频未采集不属于缺失或降级。
+            status = "ok"
+        else:
+            fatal = [c for c in state.issues if c not in _ZERO_ARTIFACT_NON_FATAL]
+            if fatal:
+                status = "error"
+                error_code = fatal[0]
+            else:
+                status = "no_face"
+    elif artifact_count == 0:
         fatal = [c for c in state.issues if c not in _ZERO_ARTIFACT_NON_FATAL]
         if fatal:
             status = "error"
@@ -331,25 +347,15 @@ def _capture_face(
     }
 
 
-def _capture_audio(
+def _store_audio_result(
     meta: dict,
     state: _State,
     subject_id: str,
     session_id: str,
     session_dir: Path,
-    mic_index: int,
-    duration_sec: float,
+    audio: AudioResult,
 ) -> None:
-    """音频分支：录音 → 写 audio.wav；失败只记 code，不抛异常。"""
-    try:
-        audio = record_audio(
-            duration_sec=duration_sec,
-            mic_index=mic_index,
-            min_speech_ratio=DEFAULT_MIN_SPEECH_RATIO,
-        )
-    except Exception:
-        audio = AudioResult(status="error", reason="audio_record_failed")
-
+    """统一应用音频结果；只有成功返回后才写 audio.wav。"""
     meta["audio"]["duration_sec"] = round(
         float(getattr(audio, "duration_sec", 0.0) or 0.0), 3
     )
@@ -375,6 +381,156 @@ def _capture_audio(
     meta["audio"]["audio_path"] = _relative_path(subject_id, session_id, "audio.wav")
 
 
+def _capture_audio(
+    meta: dict,
+    state: _State,
+    subject_id: str,
+    session_id: str,
+    session_dir: Path,
+    mic_index: int,
+    duration_sec: float | None,
+    stop_event: threading.Event | None = None,
+) -> None:
+    """音频分支：录音 → 写 audio.wav；失败只记 code，不抛异常。"""
+    try:
+        if duration_sec is None:
+            audio = record_audio(
+                duration_sec=None,
+                mic_index=mic_index,
+                min_speech_ratio=DEFAULT_MIN_SPEECH_RATIO,
+                stop_event=stop_event,
+            )
+        else:
+            # 保持定时模式的既有调用形态，兼容已有测试替身与调用方。
+            audio = record_audio(
+                duration_sec=duration_sec,
+                mic_index=mic_index,
+                min_speech_ratio=DEFAULT_MIN_SPEECH_RATIO,
+            )
+    except Exception:
+        audio = AudioResult(status="error", reason="audio_record_failed")
+
+    _store_audio_result(
+        meta, state, subject_id, session_id, session_dir, audio
+    )
+
+
+def _capture_fake_face(
+    meta: dict,
+    state: _State,
+    subject_id: str,
+    session_id: str,
+    session_dir: Path,
+) -> None:
+    """生成与既有假采集一致的人脸产物，不触达真实摄像头。"""
+    bbox = (
+        OUTPUT_SIDE // 4,
+        OUTPUT_SIDE // 4,
+        OUTPUT_SIDE // 2,
+        OUTPUT_SIDE // 2,
+    )
+    try:
+        import numpy as np
+
+        frame = np.zeros((OUTPUT_SIDE, OUTPUT_SIDE, 3), dtype=np.uint8)
+        jpeg_bytes = crop_face(
+            frame,
+            bbox,
+            margin=CROP_MARGIN,
+            output_side=OUTPUT_SIDE,
+            jpeg_quality=JPEG_QUALITY,
+        )
+    except Exception:
+        jpeg_bytes = None
+
+    if not jpeg_bytes:
+        _add_issue(state, "crop_failed")
+        return
+
+    try:
+        (session_dir / "face.jpg").write_bytes(jpeg_bytes)
+    except OSError:
+        _add_issue(state, "storage_write_failed")
+        return
+
+    meta["device"]["camera_resolution"] = [OUTPUT_SIDE, OUTPUT_SIDE]
+    state.face_written = True
+    state.face_meta = {
+        "detector": "haar",
+        "bbox": [int(value) for value in bbox],
+        "crop_margin": CROP_MARGIN,
+        "output_size": [int(OUTPUT_SIDE), int(OUTPUT_SIDE)],
+        "jpeg_quality": JPEG_QUALITY,
+        "face_path": _relative_path(subject_id, session_id, "face.jpg"),
+    }
+
+
+def _run_fake_face_only(
+    meta: dict,
+    state: _State,
+    subject_id: str,
+    session_id: str,
+    session_dir: Path,
+) -> CaptureResult:
+    """CAPTURE_FAKE=1 的签到采集：不触达摄像头或麦克风，仅生成假人脸产物。"""
+    _capture_fake_face(meta, state, subject_id, session_id, session_dir)
+    return _finalize(meta, state, session_dir)
+
+
+def _fake_manual_audio(duration_sec: float) -> AudioResult:
+    """按手动录音实际等待时长生成确定性的假语音 WAV。"""
+    try:
+        import numpy as np
+
+        total_frames = max(int(float(duration_sec) * SAMPLE_RATE), 0)
+    except Exception:
+        return AudioResult(status="error", reason="audio_record_failed")
+
+    if total_frames <= 0:
+        return AudioResult(status="no_audio", reason="empty_audio")
+
+    timeline = np.arange(total_frames, dtype=np.float64) / SAMPLE_RATE
+    pcm = np.rint(np.sin(2 * np.pi * 440 * timeline) * 0.25 * 32767)
+    data = pcm.astype(np.int16).reshape(-1, 1)
+    duration = round(total_frames / SAMPLE_RATE, 3)
+    frame_length = max(int(SAMPLE_RATE * SPEECH_FRAME_MS / 1000), 1)
+    speech_ratio = 1.0 if total_frames >= frame_length else 0.0
+
+    if speech_ratio < DEFAULT_MIN_SPEECH_RATIO:
+        return AudioResult(
+            status="no_audio",
+            duration_sec=duration,
+            speech_ratio=speech_ratio,
+            reason="speech_ratio_too_low",
+        )
+    return AudioResult(
+        status="ok",
+        wav_bytes=_encode_wav(data, SAMPLE_RATE, CHANNELS),
+        duration_sec=duration,
+        speech_ratio=speech_ratio,
+    )
+
+
+def _run_fake_both_manual(
+    meta: dict,
+    state: _State,
+    subject_id: str,
+    session_id: str,
+    session_dir: Path,
+    stop_event: threading.Event,
+) -> CaptureResult:
+    """假采集手动闭环：先写人脸，等待 stop 后才生成并保存音频。"""
+    _capture_fake_face(meta, state, subject_id, session_id, session_dir)
+    recording_started_at = time.monotonic()
+    stop_event.wait()
+    elapsed = max(time.monotonic() - recording_started_at, 0.0)
+    audio = _fake_manual_audio(elapsed)
+    _store_audio_result(
+        meta, state, subject_id, session_id, session_dir, audio
+    )
+    return _finalize(meta, state, session_dir)
+
+
 def _run(
     meta: dict,
     state: _State,
@@ -383,8 +539,9 @@ def _run(
     session_dir: Path,
     device_index: int,
     mic_index: int,
-    duration_sec: float,
+    duration_sec: float | None,
     resolution: Tuple[int, int],
+    stop_event: threading.Event | None = None,
 ) -> CaptureResult:
     try:
         frame_result = capture_frame(device_index=device_index, resolution=resolution)
@@ -418,15 +575,17 @@ def _run(
     _capture_face(
         meta, state, frame_result.frame, subject_id, session_id, session_dir
     )
-    _capture_audio(
-        meta,
-        state,
-        subject_id,
-        session_id,
-        session_dir,
-        mic_index,
-        duration_sec,
-    )
+    if not state.face_only:
+        _capture_audio(
+            meta,
+            state,
+            subject_id,
+            session_id,
+            session_dir,
+            mic_index,
+            duration_sec,
+            stop_event=stop_event,
+        )
     return _finalize(meta, state, session_dir)
 
 
@@ -436,10 +595,12 @@ def run_capture_session(
     storage_root: Union[str, Path],
     device_index: int = 0,
     mic_index: int = 0,
-    duration_sec: float = 30.0,
+    duration_sec: float | None = 30.0,
     resolution: Tuple[int, int] = (1280, 720),
+    mode: str = "both",
+    stop_event: threading.Event | None = None,
 ) -> CaptureResult:
-    """执行一次完整采集，任何失败都转成 CaptureResult，不向上抛异常。"""
+    """执行一次采集；设备与存储失败均收敛为 CaptureResult。"""
     started_at = _now()
     session_dir = (
         Path(storage_root)
@@ -449,7 +610,20 @@ def run_capture_session(
         / session_id
     )
     meta = _base_meta(subject_id, session_id, device_index, mic_index, started_at)
-    state = _State()
+    face_only = mode == "face_only"
+    manual = mode == "both" and duration_sec is None
+    if face_only:
+        # 默认 both 的 meta 结构保持原样，仅签到模式追加模式标记。
+        meta["mode"] = "face_only"
+    if manual:
+        meta["audio"]["manual"] = True
+    state = _State(face_only=face_only)
+
+    if mode not in ("both", "face_only"):
+        _add_issue(state, "unknown", detail="invalid_mode")
+        return _finalize(meta, state, session_dir)
+    if manual and stop_event is None:
+        raise ValueError("stop_event is required when duration_sec is None")
 
     try:
         session_dir.mkdir(parents=True, exist_ok=True)
@@ -458,6 +632,24 @@ def run_capture_session(
         return _finalize(meta, state, session_dir)
 
     try:
+        fake = os.environ.get("CAPTURE_FAKE") == "1"
+        if face_only and fake:
+            return _run_fake_face_only(
+                meta=meta,
+                state=state,
+                subject_id=subject_id,
+                session_id=session_id,
+                session_dir=session_dir,
+            )
+        if manual and fake:
+            return _run_fake_both_manual(
+                meta=meta,
+                state=state,
+                subject_id=subject_id,
+                session_id=session_id,
+                session_dir=session_dir,
+                stop_event=stop_event,
+            )
         return _run(
             meta=meta,
             state=state,
@@ -468,6 +660,7 @@ def run_capture_session(
             mic_index=mic_index,
             duration_sec=duration_sec,
             resolution=resolution,
+            stop_event=stop_event,
         )
     except Exception:
         _add_issue(state, "unknown")

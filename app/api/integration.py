@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -101,7 +102,7 @@ def run_analysis_for_session(
         speech_ratio=speech_ratio,
         session_status="captured",
     )
-    return run_analysis(analysis_input)
+    return run_analysis(analysis_input, kind=session.kind)
 
 
 def _transcript_path(result: dict) -> Optional[str]:
@@ -152,6 +153,94 @@ def _datetime_of(value: Optional[str]) -> datetime:
         except ValueError:
             pass
     return datetime.min.replace(tzinfo=datetime.now().astimezone().tzinfo)
+
+
+def subject_task_states(
+    db: Session, subject: Subject, *, now: Optional[datetime] = None
+) -> dict[str, dict]:
+    """按类型返回频率、最近完成时间与严格的逾期布尔判定。"""
+    now_dt = now or datetime.now().astimezone()
+    states: dict[str, dict] = {}
+    for kind, interval in (
+        ("checkin", subject.checkin_interval_days),
+        ("report", subject.report_interval_days),
+    ):
+        last_completed_at = db.scalar(
+            select(CaptureSession.captured_at)
+            .where(
+                CaptureSession.subject_id == subject.id,
+                CaptureSession.kind == kind,
+                CaptureSession.status == "captured",
+                CaptureSession.captured_at.is_not(None),
+            )
+            .order_by(CaptureSession.captured_at.desc())
+            .limit(1)
+        )
+        reference = last_completed_at or subject.created_at
+        elapsed = now_dt - _datetime_of(reference)
+        states[kind] = {
+            "interval_days": interval,
+            "last_completed_at": last_completed_at,
+            "overdue": elapsed > timedelta(days=interval),
+        }
+    return states
+
+
+def scan_subject_overdue(
+    db: Session, subject: Subject, *, now: Optional[datetime] = None
+) -> dict[str, dict]:
+    """惰性生成逾期工单；同对象同类型存在未关闭工单时保持幂等。"""
+    now_dt = now or datetime.now().astimezone()
+    states = subject_task_states(db, subject, now=now_dt)
+    active_tickets = db.scalars(
+        select(ReviewTicket).where(
+            ReviewTicket.subject_id == subject.id,
+            ReviewTicket.status != "closed",
+        )
+    ).all()
+    existing_kinds: set[str] = set()
+    for ticket in active_tickets:
+        detail = _load_json(ticket.detail_json)
+        if isinstance(detail, dict) and detail.get("overdue_kind") in (
+            "checkin",
+            "report",
+        ):
+            existing_kinds.add(detail["overdue_kind"])
+
+    opened_at = now_dt.isoformat(timespec="milliseconds")
+    for kind, state in states.items():
+        if not state["overdue"] or kind in existing_kinds:
+            continue
+        reference = state["last_completed_at"] or subject.created_at
+        elapsed = now_dt - _datetime_of(reference)
+        overdue_seconds = (
+            elapsed - timedelta(days=state["interval_days"])
+        ).total_seconds()
+        overdue_days = max(1, math.ceil(overdue_seconds / 86400))
+        db.add(
+            ReviewTicket(
+                id=str(uuid4()),
+                review_id=None,
+                subject_id=subject.id,
+                status="pending",
+                priority="P0",
+                due_at=None,
+                triggered_rules="[]",
+                evidence_json="[]",
+                detail_json=json.dumps(
+                    {"overdue_kind": kind, "overdue_days": overdue_days}
+                ),
+                suggested_method="talk_to_staff",
+                assignee=None,
+                conclusion_color=None,
+                conclusion_note=None,
+                opened_at=opened_at,
+                closed_at=None,
+            )
+        )
+        existing_kinds.add(kind)
+    db.flush()
+    return states
 
 
 def window_bounds(
@@ -238,8 +327,12 @@ def compute_and_persist_review(
     )
     final = compose(session_grading, period_grading, consistency, degraded, now)
 
-    # 规则 8：AnalysisResult 不含 capture_status，由调用方覆写建单原因。
-    if source_session.capture_status in CAPTURE_DEGRADED_STATUSES:
+    # 规则 8：checkin 的 face_only 是正常覆盖；no_audio 不构成采集降级。
+    # no_face / partial 仍按真实人脸异常走既有重采路径。
+    if source_session.capture_status in CAPTURE_DEGRADED_STATUSES and not (
+        source_session.kind == "checkin"
+        and source_session.capture_status == "no_audio"
+    ):
         final = replace(final, review_reason="capture_degraded")
 
     review = Review(
@@ -331,6 +424,7 @@ def serialize_ticket_list_item(
         "opened_at": ticket.opened_at,
         "due_at": ticket.due_at,
         "status": ticket.status,
+        "detail_json": _load_json(ticket.detail_json),
     }
 
 

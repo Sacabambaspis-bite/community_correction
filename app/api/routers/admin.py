@@ -28,6 +28,7 @@ from app.api.integration import (
     compute_and_persist_review,
     load_usable_sessions,
     now_iso,
+    scan_subject_overdue,
     serialize_review,
     serialize_ticket_detail,
     serialize_ticket_list_item,
@@ -37,6 +38,8 @@ from app.api.schemas import (
     ReviewCreateRequest,
     SessionListItem,
     SessionListOut,
+    SubjectFrequencyOut,
+    SubjectFrequencyRequest,
     SubjectListItem,
     SubjectListOut,
     TicketDetailOut,
@@ -73,6 +76,45 @@ def _load_rules(raw: Optional[str]) -> list[str]:
     return value if isinstance(value, list) else []
 
 
+def _subject_summary(
+    db: Session, subject: Subject, states: dict[str, dict]
+) -> SubjectListItem:
+    """对象列表与详情共用的摘要序列化。"""
+    review = db.scalars(
+        select(Review)
+        .where(Review.subject_id == subject.id)
+        .order_by(desc(Review.created_at))
+        .limit(1)
+    ).first()
+    pending_tickets = db.scalar(
+        select(func.count())
+        .select_from(ReviewTicket)
+        .where(
+            ReviewTicket.subject_id == subject.id,
+            ReviewTicket.status == "pending",
+        )
+    ) or 0
+    latest_session_at = db.scalar(
+        select(func.max(CaptureSession.captured_at)).where(
+            CaptureSession.subject_id == subject.id
+        )
+    )
+    return SubjectListItem(
+        subject_id=subject.id,
+        code=subject.code,
+        name=subject.name,
+        status=subject.status,
+        checkin_interval_days=subject.checkin_interval_days,
+        report_interval_days=subject.report_interval_days,
+        latest_color=review.final_color if review else None,
+        latest_color_at=review.created_at if review else None,
+        latest_rules=_load_rules(review.rules_fired) if review else [],
+        pending_tickets=pending_tickets,
+        latest_session_at=latest_session_at,
+        overdue={kind: state["overdue"] for kind, state in states.items()},
+    )
+
+
 @router.get("/subjects")
 def list_subjects(
     keyword: Optional[str] = None,
@@ -105,44 +147,85 @@ def list_subjects(
         .limit(page_size)
     ).all()
 
-    items: list[SubjectListItem] = []
-    for subject in subjects:
-        review = db.scalars(
-            select(Review)
-            .where(Review.subject_id == subject.id)
-            .order_by(desc(Review.created_at))
-            .limit(1)
-        ).first()
-        pending_tickets = db.scalar(
-            select(func.count())
-            .select_from(ReviewTicket)
-            .where(
-                ReviewTicket.subject_id == subject.id,
-                ReviewTicket.status == "pending",
-            )
-        ) or 0
-        latest_session_at = db.scalar(
-            select(func.max(CaptureSession.captured_at)).where(
-                CaptureSession.subject_id == subject.id
-            )
-        )
-        items.append(
-            SubjectListItem(
-                subject_id=subject.id,
-                code=subject.code,
-                name=subject.name,
-                status=subject.status,
-                latest_color=review.final_color if review else None,
-                latest_color_at=review.created_at if review else None,
-                latest_rules=_load_rules(review.rules_fired) if review else [],
-                pending_tickets=pending_tickets,
-                latest_session_at=latest_session_at,
-            )
-        )
+    states_by_subject = {
+        subject.id: scan_subject_overdue(db, subject) for subject in subjects
+    }
+    db.commit()
+    items = [
+        _subject_summary(db, subject, states_by_subject[subject.id])
+        for subject in subjects
+    ]
 
     return envelope(
         data=SubjectListOut(
             items=items, page=page, page_size=page_size, total=total
+        ).model_dump()
+    )
+
+
+@router.get("/subjects/{subject_id}")
+def get_subject(
+    subject_id: str,
+    _role: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    subject = db.get(Subject, subject_id)
+    if subject is None:
+        raise BizError(NOT_FOUND, "not_found")
+    states = scan_subject_overdue(db, subject)
+    db.commit()
+    return envelope(data=_subject_summary(db, subject, states).model_dump())
+
+
+@router.patch("/subjects/{subject_id}/frequency")
+def update_subject_frequency(
+    subject_id: str,
+    payload: SubjectFrequencyRequest,
+    _role: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    if (
+        payload.checkin_interval_days is None
+        and payload.report_interval_days is None
+    ):
+        raise BizError(INVALID_REQUEST, "invalid_request")
+    subject = db.get(Subject, subject_id)
+    if subject is None:
+        raise BizError(NOT_FOUND, "not_found")
+
+    changes: dict[str, int] = {}
+    if payload.checkin_interval_days is not None:
+        subject.checkin_interval_days = payload.checkin_interval_days
+        changes["checkin_interval_days"] = payload.checkin_interval_days
+    if payload.report_interval_days is not None:
+        subject.report_interval_days = payload.report_interval_days
+        changes["report_interval_days"] = payload.report_interval_days
+
+    now = _now()
+    subject.updated_at = now
+    db.add(
+        AuditLog(
+            actor_type="staff",
+            actor_id=None,
+            action="frequency.update",
+            target_type="subject",
+            target_id=subject.id,
+            detail_json=json.dumps(changes),
+            request_id=current_request_id(),
+            created_at=now,
+        )
+    )
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    return envelope(
+        data=SubjectFrequencyOut(
+            subject_id=subject.id,
+            checkin_interval_days=subject.checkin_interval_days,
+            report_interval_days=subject.report_interval_days,
         ).model_dump()
     )
 
@@ -182,6 +265,7 @@ def list_sessions(
         SessionListItem(
             session_id=session.id,
             subject_id=session.subject_id,
+            kind=session.kind,
             status=session.status,
             capture_status=session.capture_status,
             coverage=session.coverage,
@@ -349,7 +433,7 @@ def list_tickets(
     count_stmt = select(func.count()).select_from(ReviewTicket)
     list_stmt = (
         select(ReviewTicket, Review, Subject)
-        .join(Review, ReviewTicket.review_id == Review.id)
+        .outerjoin(Review, ReviewTicket.review_id == Review.id)
         .join(Subject, ReviewTicket.subject_id == Subject.id)
     )
     for condition in conditions:
@@ -555,6 +639,8 @@ def dashboard(
     if subject is None:
         raise BizError(NOT_FOUND, "not_found")
 
+    states = scan_subject_overdue(db, subject)
+    db.commit()
     reviews = db.scalars(
         select(Review).where(Review.subject_id == subject.id)
     ).all()
@@ -602,5 +688,6 @@ def dashboard(
             trend_7d=trend,
             pending_tickets=pending_tickets,
             last_session_at=last_session_at,
+            overdue={kind: state["overdue"] for kind, state in states.items()},
         ).model_dump()
     )

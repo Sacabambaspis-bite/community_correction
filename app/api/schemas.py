@@ -29,18 +29,21 @@ class HealthOut(BaseModel):
 
 class CreateSessionRequest(BaseModel):
     subject_id: str = Field(..., min_length=1, max_length=64)
+    kind: Literal["checkin", "report"] = "report"
     device_index: int = Field(default=0, ge=0)
-    duration_sec: float = Field(default=10, gt=0)
+    duration_sec: Optional[float] = Field(default=None, gt=0)
 
 
 class CreateSessionOut(BaseModel):
     session_id: str
     status: str
+    kind: Literal["checkin", "report"]
 
 
 class SessionOut(BaseModel):
     session_id: str
     subject_id: str
+    kind: Literal["checkin", "report"]
     status: str
     capture_status: Optional[str] = None
     coverage: Optional[str] = None
@@ -59,11 +62,14 @@ class SubjectListItem(BaseModel):
     code: str
     name: str
     status: str
+    checkin_interval_days: int
+    report_interval_days: int
     latest_color: Optional[str] = None
     latest_color_at: Optional[str] = None
     latest_rules: list[str] = Field(default_factory=list)
     pending_tickets: int
     latest_session_at: Optional[str] = None
+    overdue: dict[str, bool]
 
 
 class SubjectListOut(BaseModel):
@@ -76,6 +82,7 @@ class SubjectListOut(BaseModel):
 class SessionListItem(BaseModel):
     session_id: str
     subject_id: str
+    kind: Literal["checkin", "report"]
     status: str
     capture_status: Optional[str] = None
     coverage: Optional[str] = None
@@ -111,7 +118,7 @@ class ConsentGrantRequest(BaseModel):
     subject_id: str = Field(..., min_length=1, max_length=64)
     face: bool
     audio: bool
-    retention_days: int = Field(..., ge=1)
+    retention_days: int = Field(default=180, ge=1)
 
 
 class ConsentRevokeRequest(BaseModel):
@@ -126,9 +133,31 @@ class FeedbackOut(BaseModel):
     next_action: str
 
 
+class TaskKindOut(BaseModel):
+    interval_days: int
+    last_completed_at: Optional[str] = None
+    overdue: bool
+
+
+class UserTasksOut(BaseModel):
+    checkin: TaskKindOut
+    report: TaskKindOut
+
+
 # ---- 管理端复盘 / 工单 / 看板（api@1.5 §7.9-§7.14）----
 
 Color = Literal["green", "blue", "yellow", "orange", "red"]
+
+
+class SubjectFrequencyRequest(BaseModel):
+    checkin_interval_days: Optional[int] = Field(default=None, ge=1, strict=True)
+    report_interval_days: Optional[int] = Field(default=None, ge=1, strict=True)
+
+
+class SubjectFrequencyOut(BaseModel):
+    subject_id: str
+    checkin_interval_days: int
+    report_interval_days: int
 
 
 class ReviewCreateRequest(BaseModel):
@@ -164,6 +193,7 @@ class TicketListItemOut(BaseModel):
     opened_at: str
     due_at: Optional[str] = None
     status: str
+    detail_json: Optional[dict] = None
 
 
 class TicketListOut(BaseModel):
@@ -216,3 +246,4 @@ class DashboardOut(BaseModel):
     trend_7d: list[TrendPointOut] = Field(default_factory=list)
     pending_tickets: int
     last_session_at: Optional[str] = None
+    overdue: dict[str, bool]

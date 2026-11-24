@@ -39,6 +39,7 @@ def calculate_consistency(
     channels: dict[str, dict[str, Any]],
     text_valence: float,
     confidence_threshold: float = CONFIDENCE_THRESHOLD,
+    kind: str = "report",
 ) -> tuple[str, dict[str, Any]]:
     """冲突和低置信优先；分析降级时 high 最高降为 medium。"""
     directions: dict[str, str] = {}
@@ -70,12 +71,21 @@ def calculate_consistency(
     degraded = any(
         channel["status"] in {"degraded", "skipped"} for channel in channels.values()
     )
-    forced_low = (
-        coverage in {"face_only", "audio_only"}
-        or capture_status in {"partial", "no_face", "no_audio"}
-    )
+    if kind == "checkin":
+        # face_only 与 no_audio 是签到预期覆盖；采集异常仍强制低一致性。
+        forced_low = capture_status in {"partial", "no_face"}
+    else:
+        forced_low = (
+            coverage in {"face_only", "audio_only"}
+            or capture_status in {"partial", "no_face", "no_audio"}
+        )
 
-    if forced_low or conflict or low_confidence_channels or agree_count < 2:
+    if forced_low or conflict or low_confidence_channels:
+        consistency = "low"
+    elif kind == "checkin" and agree_count == 1:
+        # 单一 face 通道没有跨模态一致性可判，medium 仅表示中性而非高一致。
+        consistency = "medium"
+    elif agree_count < 2:
         consistency = "low"
     elif agree_count == 3 and not degraded:
         consistency = "high"

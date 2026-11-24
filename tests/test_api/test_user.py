@@ -156,6 +156,26 @@ def test_put_consent_grants_and_writes_audit(client, db_factory, user_headers):
         assert log.request_id
 
 
+def test_put_consent_defaults_retention_days(client, db_factory, user_headers):
+    _add_subject(db_factory)
+
+    response = client.put(
+        "/api/user/consent",
+        json={"subject_id": _SUBJECT_ID, "face": True, "audio": True},
+        headers=user_headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == 0
+    assert body["data"]["retention_days"] == 180
+
+    with db_factory() as db:
+        subject = db.get(Subject, _SUBJECT_ID)
+        stored = json.loads(subject.consent_json)
+        assert stored["retention_days"] == 180
+
+
 def test_put_consent_rejects_invalid_retention(client, db_factory, user_headers):
     _add_subject(db_factory)
 

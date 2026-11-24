@@ -20,6 +20,7 @@ from app.api.deps import (
     get_db,
     require_admin,
     require_any_subject_or_staff,
+    require_user,
 )
 from app.api.integration import (
     compute_and_persist_review,
@@ -35,6 +36,7 @@ from app.api.errors import (
     INTERNAL_ERROR,
     NOT_FOUND,
     SESSION_NOT_CAPTURED,
+    STATE_CONFLICT,
     BizError,
     current_request_id,
     envelope,
@@ -54,6 +56,27 @@ router = APIRouter(prefix="/api", tags=["sessions"])
 
 #: 同一时刻只允许一个采集任务。
 _CAPTURE_LOCK = threading.Lock()
+
+#: 活动中的手动 report 会话；终态回写后由后台任务清理。
+_MANUAL_STOP_EVENTS: dict[str, threading.Event] = {}
+_MANUAL_STOP_EVENTS_LOCK = threading.Lock()
+
+
+def _register_manual_stop_event(session_id: str) -> threading.Event:
+    event = threading.Event()
+    with _MANUAL_STOP_EVENTS_LOCK:
+        _MANUAL_STOP_EVENTS[session_id] = event
+    return event
+
+
+def _get_manual_stop_event(session_id: str) -> Optional[threading.Event]:
+    with _MANUAL_STOP_EVENTS_LOCK:
+        return _MANUAL_STOP_EVENTS.get(session_id)
+
+
+def _discard_manual_stop_event(session_id: str) -> None:
+    with _MANUAL_STOP_EVENTS_LOCK:
+        _MANUAL_STOP_EVENTS.pop(session_id, None)
 
 
 def _now() -> str:
@@ -81,6 +104,7 @@ def _session_payload(session: CaptureSession) -> dict:
     return SessionOut(
         session_id=session.id,
         subject_id=session.subject_id,
+        kind=session.kind,
         status=session.status,
         capture_status=session.capture_status,
         coverage=session.coverage,
@@ -99,40 +123,51 @@ def _capture_result(
     *,
     subject_id: str,
     session_id: str,
+    kind: str,
     device_index: int,
-    duration_sec: float,
+    duration_sec: Optional[float],
+    stop_event: Optional[threading.Event] = None,
 ):
-    """采集入口：`CAPTURE_FAKE=1` 时返回假结果，测试不触达真实摄像头。"""
-    if os.environ.get("CAPTURE_FAKE") == "1":
+    """采集入口；手动假采集由 capture 模块等待 stop_event 后生成产物。"""
+    manual = kind == "report" and duration_sec is None
+    if os.environ.get("CAPTURE_FAKE") == "1" and not manual:
         base = f"subjects/{subject_id}/sessions/{session_id}"
         return SimpleNamespace(
             capture_status="ok",
             face_path=f"{base}/face.jpg",
-            audio_path=f"{base}/audio.wav",
+            audio_path=None if kind == "checkin" else f"{base}/audio.wav",
             codes=[],
             meta={
                 "finished_at": _now(),
-                "audio": {"duration_sec": duration_sec},
+                "audio": {
+                    "duration_sec": None if kind == "checkin" else duration_sec
+                },
             },
         )
 
     from app.capture.session import run_capture_session
 
-    return run_capture_session(
-        subject_id=subject_id,
-        session_id=session_id,
-        storage_root=STORAGE_ROOT,
-        device_index=device_index,
-        duration_sec=duration_sec,
-    )
+    capture_kwargs = {
+        "subject_id": subject_id,
+        "session_id": session_id,
+        "storage_root": STORAGE_ROOT,
+        "device_index": device_index,
+        "duration_sec": duration_sec,
+        "mode": "face_only" if kind == "checkin" else "both",
+    }
+    if manual:
+        capture_kwargs["stop_event"] = stop_event
+    return run_capture_session(**capture_kwargs)
 
 
 def _run_capture_and_persist(
     *,
     session_id: str,
     subject_id: str,
+    kind: str,
     device_index: int,
-    duration_sec: float,
+    duration_sec: Optional[float],
+    stop_event: Optional[threading.Event] = None,
 ) -> None:
     """后台采集：独立会话、独立事务，结束后必定释放并发闸。
 
@@ -144,8 +179,10 @@ def _run_capture_and_persist(
         result = _capture_result(
             subject_id=subject_id,
             session_id=session_id,
+            kind=kind,
             device_index=device_index,
             duration_sec=duration_sec,
+            stop_event=stop_event,
         )
         session = db.get(CaptureSession, session_id)
         if session is None:
@@ -186,6 +223,8 @@ def _run_capture_and_persist(
             logger.error("capture.persist_failed session_id=%s", session_id)
     finally:
         db.close()
+        if kind == "report" and duration_sec is None:
+            _discard_manual_stop_event(session_id)
         _release_capture_lock()
 
 
@@ -198,6 +237,7 @@ def create_session(
 ) -> dict:
     if not _CAPTURE_LOCK.acquire(blocking=False):
         raise BizError(INTERNAL_ERROR, "capture_busy")
+    stop_event: Optional[threading.Event] = None
     try:
         subject = db.get(Subject, payload.subject_id)
         if subject is None:
@@ -211,6 +251,7 @@ def create_session(
             CaptureSession(
                 id=session_id,
                 subject_id=payload.subject_id,
+                kind=payload.kind,
                 status="created",
                 capture_status=None,
                 analysis_status="pending",
@@ -219,17 +260,38 @@ def create_session(
             )
         )
         db.commit()
-        background_tasks.add_task(
-            _run_capture_and_persist,
-            session_id=session_id,
-            subject_id=payload.subject_id,
-            device_index=payload.device_index,
-            duration_sec=payload.duration_sec,
-        )
+        if payload.kind == "report" and payload.duration_sec is None:
+            stop_event = _register_manual_stop_event(session_id)
+
+        task_kwargs = {
+            "session_id": session_id,
+            "subject_id": payload.subject_id,
+            "kind": payload.kind,
+            "device_index": payload.device_index,
+            "duration_sec": payload.duration_sec,
+            "stop_event": stop_event,
+        }
+        if stop_event is None:
+            background_tasks.add_task(_run_capture_and_persist, **task_kwargs)
+        else:
+            # TestClient 会等待 BackgroundTasks 完成；手动采集需先返回响应，
+            # 让后续 stop 请求能够置位事件。定时路径保持原有调度方式。
+            threading.Thread(
+                target=_run_capture_and_persist,
+                kwargs=task_kwargs,
+                daemon=True,
+                name=f"capture-{session_id}",
+            ).start()
     except Exception:
+        if stop_event is not None:
+            _discard_manual_stop_event(session_id)
         _release_capture_lock()
         raise
-    return envelope(data=CreateSessionOut(session_id=session_id, status="created").model_dump())
+    return envelope(
+        data=CreateSessionOut(
+            session_id=session_id, status="created", kind=payload.kind
+        ).model_dump()
+    )
 
 
 @router.get("/sessions/{session_id}")
@@ -262,6 +324,30 @@ def get_session(
             degraded=degraded,
         )
     return envelope(data=data, degraded=degraded)
+
+
+@router.post("/sessions/{session_id}/stop")
+def stop_session(
+    session_id: str,
+    subject_id: Optional[str] = Query(default=None),
+    _role: str = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """仅置位活动手动会话的停止事件，不写库、不直接推进状态。"""
+    session = db.get(CaptureSession, session_id)
+    if session is None:
+        raise BizError(NOT_FOUND, "not_found")
+    enforce_session_owner(session, _role, subject_id)
+
+    if session.kind != "report" or session.status != "created":
+        raise BizError(STATE_CONFLICT, "session_not_stoppable")
+    stop_event = _get_manual_stop_event(session_id)
+    if stop_event is None:
+        # 定时 created、checkin，或进程内已无活动手动任务均不可停止。
+        raise BizError(STATE_CONFLICT, "session_not_stoppable")
+
+    stop_event.set()
+    return envelope(data={"session_id": session.id})
 
 
 def _write_analyze_audit(db: Session, session_id: str, now: str) -> None:

@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import enforce_session_owner, get_db, require_user
+from app.api.integration import subject_task_states
 from app.api.errors import (
     INTERNAL_ERROR,
     INVALID_REQUEST,
@@ -26,6 +27,8 @@ from app.api.schemas import (
     ConsentRevokeRequest,
     ConsentScope,
     FeedbackOut,
+    TaskKindOut,
+    UserTasksOut,
     degraded_flags,
 )
 from app.db.models import AuditLog, CaptureSession, Subject
@@ -143,6 +146,22 @@ def _get_subject(db: Session, subject_id: str) -> Subject:
 
 
 # ---- 端点 ----
+
+
+@router.get("/tasks")
+def get_tasks(
+    subject_id: str = Query(...),
+    _role: str = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """返回签到与汇报任务提示，不暴露色码、规则或分值。"""
+    subject = _get_subject(db, subject_id)
+    states = subject_task_states(db, subject)
+    data = UserTasksOut(
+        checkin=TaskKindOut(**states["checkin"]),
+        report=TaskKindOut(**states["report"]),
+    )
+    return envelope(data=data.model_dump())
 
 
 @router.get("/consent")

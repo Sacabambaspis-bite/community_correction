@@ -2,10 +2,31 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from app.analysis.models import ProviderInput
 from app.analysis.paths import session_directory, transcript_relative_path
+
+
+def write_transcript(input: ProviderInput, transcript: str) -> str:
+    """原子写入会话 transcript.txt，返回契约规定的相对路径。"""
+    session_dir = session_directory(
+        Path(input.storage_root), input.subject_id, input.session_id
+    )
+    target = session_dir / "transcript.txt"
+    temporary = session_dir / ".transcript.txt.tmp"
+    try:
+        session_dir.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(transcript, encoding="utf-8")
+        temporary.replace(target)
+    except Exception:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    return transcript_relative_path(input.subject_id, input.session_id)
 
 
 class MockAsrProvider:
@@ -23,23 +44,7 @@ class MockAsrProvider:
             raise ValueError("audio_unavailable")
 
         transcript = self._scenario["transcript"]
-        session_dir = session_directory(
-            input.storage_root, input.subject_id, input.session_id
-        )
-        target = session_dir / "transcript.txt"
-        temporary = session_dir / ".transcript.txt.tmp"
-        try:
-            session_dir.mkdir(parents=True, exist_ok=True)
-            temporary.write_text(transcript, encoding="utf-8")
-            temporary.replace(target)
-        except Exception:
-            try:
-                temporary.unlink(missing_ok=True)
-            except OSError:
-                pass
-            raise
-
-        relative_path = transcript_relative_path(input.subject_id, input.session_id)
+        relative_path = write_transcript(input, transcript)
         return {
             "status": "ok",
             "output": {

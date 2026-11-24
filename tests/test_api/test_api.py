@@ -307,7 +307,7 @@ def test_create_session_fake_capture_success(
     _grant_consent(db_factory)
 
     created = client.post(
-        "/api/sessions", json={"subject_id": _SUBJECT_ID}, headers=user_headers
+        "/api/sessions", json={"subject_id": _SUBJECT_ID, "duration_sec": 10}, headers=user_headers
     )
     body = created.json()
     assert body["code"] == 0
@@ -343,7 +343,7 @@ def test_capture_failure_persists_and_does_not_leak_path(
     caplog.set_level(logging.INFO, logger="app.api")
 
     created = client.post(
-        "/api/sessions", json={"subject_id": _SUBJECT_ID}, headers=user_headers
+        "/api/sessions", json={"subject_id": _SUBJECT_ID, "duration_sec": 10}, headers=user_headers
     )
     session_id = created.json()["data"]["session_id"]
 
@@ -365,7 +365,7 @@ def test_create_session_returns_capture_busy_when_lock_held(
     assert acquired
     try:
         response = client.post(
-            "/api/sessions", json={"subject_id": _SUBJECT_ID}, headers=user_headers
+            "/api/sessions", json={"subject_id": _SUBJECT_ID, "duration_sec": 10}, headers=user_headers
         )
     finally:
         sessions_router._CAPTURE_LOCK.release()
@@ -398,7 +398,7 @@ def test_create_session_requires_consent(client, db_factory, user_headers):
     _add_subject(db_factory)
 
     response = client.post(
-        "/api/sessions", json={"subject_id": _SUBJECT_ID}, headers=user_headers
+        "/api/sessions", json={"subject_id": _SUBJECT_ID, "duration_sec": 10}, headers=user_headers
     )
     body = response.json()
     assert body["code"] == 1005
@@ -416,7 +416,7 @@ def test_create_session_rejects_revoked_consent(client, db_factory, user_headers
     )
 
     response = client.post(
-        "/api/sessions", json={"subject_id": _SUBJECT_ID}, headers=user_headers
+        "/api/sessions", json={"subject_id": _SUBJECT_ID, "duration_sec": 10}, headers=user_headers
     )
     body = response.json()
     assert body["code"] == 1005
@@ -431,7 +431,7 @@ def test_create_session_rejects_incomplete_consent(client, db_factory, user_head
     _set_consent(db_factory, _consent_payload(face=True, audio=False))
 
     response = client.post(
-        "/api/sessions", json={"subject_id": _SUBJECT_ID}, headers=user_headers
+        "/api/sessions", json={"subject_id": _SUBJECT_ID, "duration_sec": 10}, headers=user_headers
     )
     body = response.json()
     assert body["code"] == 1005
