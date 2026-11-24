@@ -1,6 +1,6 @@
 # 项目进度（PROGRESS）
 
-> 生成时间：2026-11-24 · 基准提交：`43d3aba` · 依据：`git log`、`git tag`、`pytest` 实测、[QA 报告](./reports/qa-2026-11-24.md)。
+> 生成时间：2026-11-24 · 基准提交：`4f5d1bf`（`main` 与 `origin/main` 同步）· 依据：`git log`、`git tag`、`pytest` 实测、[QA 报告](./reports/qa-2026-11-24.md)。
 > 本文只记录仓库里可核实的事实；尚未实现或未定稿的内容标注「待确认」。
 
 ## 1. 项目定位与技术栈
@@ -11,11 +11,12 @@
 |---|---|---|
 | 运行时 | Python 3.11 | 已用（本机 3.11.0rc2） |
 | 采集 | OpenCV / MediaPipe / sounddevice | 已实现并硬件验证，封存于 `capture-v1` |
-| Web 框架 | FastAPI 0.165.0 + uvicorn 0.54.0 | 骨架已实现（`api-v1`） |
+| Web 框架 | FastAPI 0.165.0 + uvicorn 0.54.0 | 骨架 + 用户端 / consent 已实现（`api-v1` → `api@1.5`） |
 | ORM / 数据库 | SQLAlchemy 2.x（原型阶段手工迁移）/ SQLite | 5 张表已实现（`db-v1`）；本机实际 2.1.9，`requirements` 已锁 `<2.1` |
+| 分析 | Provider 抽象 + 确定性 mock | 四路 mock 已实现（`app/analysis/`），真模型未接 |
+| Schema 校验 | jsonschema（Draft 2020-12 + FormatChecker） | 已引入，分析结果强制校验 |
 | 前端 | React + Vite（用户端 / 管理端同仓，按路由分区） | 未实现 |
-| 模型 | Provider 抽象 + mock | 未实现，本轮不接真模型 |
-| 测试 | pytest | 34 条全绿（capture 6 / db 13 / api 15） |
+| 测试 | pytest | 106 条全绿（capture 6 / db 13 / api 32 / analysis 55） |
 
 技术栈来源：[architecture.md](./architecture.md#L11-L21)；采集运行在后端宿主设备而非浏览器（[architecture.md](./architecture.md#L23-L31)）。
 
@@ -32,12 +33,20 @@
 | 真实硬件端到端验证 | 已通过 | `ok` / `both` 一次；另有 `no_audio`、`no_face_no_audio` 历史结果 |
 | `app/db/` 五张表 + 派生 `coverage` + 服务端默认值 | 已实现 | `db-v1` → `bc83a3e` |
 | `app/api/` 骨架（信封 / 鉴权 / 异步采集 / 2001/2003） | 已实现 | `api-v1` → `79e582d` |
+| 契约文档 api@1.5（用户端 / consent / 会话归属） | 已冻结 | `4f5d1bf` |
+| `app/api/` 用户端端点、consent 三闸、会话归属校验 | 已实现 | `4f5d1bf` |
+| `app/analysis/` 四路 mock、Schema 校验、一致性判定 | 已实现（未打标签） | `81a8499` |
+| `tests/test_analysis/`（55 条） | 全绿 | `81a8499` |
+| 远程仓库 | 已推送 | `origin/main` @ `4f5d1bf` |
 | `scripts/seed_demo.py` 演示数据（含占位素材） | 已实现 | `0bb78b5` |
 | QA 核验 + M1–M4/L4/L8 修复 | 已完成 | `638245e`（报告）、`7732930`（修复） |
 
 提交历史（近 14 条）：
 
 ```
+4f5d1bf  feat(api): user endpoints, consent gates, session ownership (api@1.5)
+81a8499  feat(analysis): deterministic four-channel mock pipeline + schema/consistency
+9b2a04d  docs: refresh PROGRESS snapshot; fix agents README (5 tables, /api/sessions, tests/test_db)
 43d3aba  chore(agents): align analysis/grading instructions with contracts
 7732930  fix(qa): M1-M4/L4/L8 - pin SQLAlchemy<2.1, FK test pragma, safe logs, injectable session factory
 638245e  docs: QA report 2026-11-24 + db coverage derived note + window_days default
@@ -49,12 +58,9 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 492c764  docs: add PROGRESS snapshot (repo-state based)
 55c9a25  feat(capture): verified on real hardware (ok/both); prefer DirectShow, 16k audio    [capture-v1]
 787ee0e  feat(capture): align to contract state machine (coverage/warnings/optional crop) + tests
-8698a26  docs: contracts v1.2 freeze (degraded array + analysis_status + ui copy)           [contracts-v1.2]
-2003967  docs: close grading partial + ui no_face/no_audio + api degrade semantics
-7a6f0cf  baseline: contracts v1.1 + app/capture                                              [contracts-v1.1]
 ```
 
-**尚未实现的模块**：`app/analysis/`、`app/grading/`、`web/`。`app/capture/` 已封存；`app/db/` 与 `app/api/` 骨架已实现。
+**尚未实现**：`app/grading/`、`web/`。`app/api/` 的 analyze 与 review 接入仍延期。`app/capture/` 已封存，`app/db/`、`app/api/` 骨架与 `app/analysis/` mock 已实现。
 
 采集模块已落地的契约要点：
 
@@ -64,14 +70,25 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 - 人脸检测顺序 MediaPipe → OpenCV DNN → Haar；裁剪外扩 25%、JPEG 质量 85；
 - 目录固定为 `storage/subjects/{subject_id}/sessions/{session_id}/`，原始帧不落盘。
 
-数据层与 API 骨架已落地的要点：
+数据层、分析层与 API 已落地的要点：
 
 - 五张表：`subjects` / `sessions` / `reviews` / `review_tickets` / `audit_logs`，字段、CHECK、索引与 db@1.4 一致；
 - `sessions.coverage` 为派生属性，不落列；`analysis_status`、`gender`、`status`、`window_days` 有服务端默认值；
 - `reviews` 唯一约束 `UNIQUE(subject_id, window_end)`；JSON 列统一 `IS NULL OR json_valid(...)`；
 - 统一信封 `{code, message, data, degraded, request_id}`，业务错误一律 HTTP 200，未捕获异常 HTTP 500 + `code=5000`；
-- 已实现：`GET /api/health`、`POST/GET /api/sessions`、`GET /api/admin/subjects|sessions`、`GET /api/admin/sessions/{id}/face`（写 `audit_logs`）、`POST /api/sessions/{id}/analyze`（占位 `5000 analysis_pipeline_not_ready`）；
-- 分析未接入前，`GET /api/sessions/{id}` 已按 `captured→2001`、`analysis failed→2003` 的优先级映射。
+- 已实现：`GET /api/health`、`POST/GET /api/sessions`、`GET /api/admin/subjects|sessions`、`GET /api/admin/sessions/{id}/face`（写 `audit_logs`）；
+- 已实现用户端：`GET/PUT /api/user/consent`、`POST /api/user/consent/revoke`、`GET /api/user/sessions/{id}/feedback`；`POST /api/sessions` 前置 consent 三闸（`consent_revoked` → `consent_required` → `consent_incomplete`）；
+- 会话归属校验：`subject` 调用 `GET /api/sessions/{id}` 与 feedback 时必须带 `subject_id`，缺失 `1001`、不匹配 `1003`；
+- `POST /api/sessions/{id}/analyze` 仍为占位 `5000 analysis_pipeline_not_ready`；分析未接入前，`GET /api/sessions/{id}` 已按 `captured→2001`、`analysis failed→2003` 的优先级映射。
+
+分析模块（`app/analysis/`，全部 mock）已落地的要点：
+
+- 四路 Provider：`mock-asr@1.0` / `mock-emotion@1.0` / `mock-face@1.0` / `mock-psych@1.0`，场景 `normal` / `negative` / `crisis` / `conflict` 确定性输出；
+- ASR 生成会话内 `transcript.txt`，结果只存规范相对路径，不返回原文；
+- 运行状态与结果分离：`AnalysisRunResult.analysis_status` 为 `done/degraded/failed`，纯 `AnalysisResult` 不含该字段；
+- 通道级与完整 JSON Schema 校验（Draft 2020-12 + `FormatChecker`），失败不得进入 grading；
+- 单路 `unavailable` → `skipped`，单路异常或非法输出 → `degraded`，互不影响；ASR 失败时 psych 为 `skipped`；四路均无可用输出 → `failed` 且 `result=None`；
+- 一致性：单模态、`partial`（即使 `coverage=both`）、方向冲突、低置信均强制 `low + needs_review=true`；`degraded` 时最高 `medium`。
 
 ## 3. 关键决策与理由
 
@@ -93,6 +110,9 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 | **后台采集可注入 + `CAPTURE_FAKE`** | [sessions.py](../app/api/routers/sessions.py)、[deps.py](../app/api/deps.py) | 测试不触真实摄像头；session factory 可替换，后台任务可观测 |
 | **SQLAlchemy 临时锁 `<2.1`** | [requirements.txt](../requirements.txt)、[migrations/README](../app/db/migrations/README.md) | 2.1.x 开启外键时多表同事务 flush 顺序错误（QA M1）；seed 的逐表 flush 作为双保险 |
 | **分析全走 mock Provider** | [prd.md](./prd.md#L33) | 本轮先跑通链路与契约，不引入模型不确定性 |
+| **分析运行状态与结果分离** | [models.py](../app/analysis/models.py)、[pipeline.py](../app/analysis/pipeline.py) | `AnalysisResult` 严格对齐 schema；`done/degraded/failed` 放在独立包装层，失败不产出可进入 grading 的结果 |
+| **`risk_level` 暂为占位** | [pipeline.py](../app/analysis/pipeline.py#L29-L32) | 契约未给映射，占位返回 `pending` 并留 TODO；不发明风险档位 |
+| **分析阈值暂放 analysis** | [config.py](../app/analysis/config.py) | 临时 `CONFIDENCE_THRESHOLD = 0.6`，后续由 grading 统一适配 |
 
 ## 4. 当前未完成项与阻塞
 
@@ -100,17 +120,19 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 
 | 目录 | 内容 | 状态 |
 |---|---|---|
-| `app/analysis/` | 四路管线（ASR / 语音情感 / 表情 / 心理文本）、Provider 抽象、一致性判定 | 未开始 |
+| `app/analysis/` | 四路 mock、Schema 校验、一致性判定 | 已实现（`81a8499`）；真模型与 `risk_level` 映射待补 |
 | `app/grading/` | 五色规则、七日趋势偏移、合成封顶、工单草案 | 未开始 |
-| `app/api/` | 用户端端点、consent 校验、review 查询、分析接入 | 骨架已实现，延期项见下 |
+| `app/api/` | analyze 接入、review 查询、60 秒频控 | 骨架 + 用户端 / consent / 归属已实现（`4f5d1bf`），余项见下 |
 | `web/` | 用户端 3 页 + 管理端 4 页 | 未开始 |
 
-**API 骨架延期项（前端开工前必须补齐）**
+**API 剩余延期项**
 
-- `/api/user/*` 全部端点：consent 查询 / 提交 / 撤回、`feedback`；
-- `POST /api/sessions` 的 consent 前置校验（`1005 consent_required` / `consent_revoked`）；
-- `subject` token 的会话归属校验（只能访问本人 session，越权返回 `1003`）；
-- `POST /api/sessions/{id}/analyze` 与 review 查询待 `app/analysis`、`app/grading` 就绪后接入。
+- `POST /api/sessions/{id}/analyze` 接入 `app/analysis`（当前仍返回 `5000 analysis_pipeline_not_ready`）；
+- review 查询与新复盘生成（依赖 `app/grading/`）；
+- 60 秒重复建会话频控（`1006`）；
+- `capture_busy` 专用业务码（当前复用 `code=5000`）。
+
+已补齐（`4f5d1bf`）：`/api/user/*` 全部端点、`POST /api/sessions` 的 consent 三闸、`subject` 会话归属校验。
 
 **演示数据说明**
 
@@ -125,17 +147,18 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 3. **`window_days` 默认值只影响新建表**：reviews 端点落地前需重建 `storage/app.db`（当前库已按 db@1.4 重建过一次）。
 4. **500 响应缺 CORS 头**：未捕获异常由最外层 `ServerErrorMiddleware` 处理，浏览器跨域读不到该信封；`X-Request-Id` 与 `request_id` 仍在。
 5. **麦克风音量**：本机默认输入曾长期近乎静音（峰值 7/32768、`speech_ratio=0`），最后一次正式验证为 `ok`（`speech_ratio=0.3153`），现场部署前需复核设备与增益。
-6. **真实模型未接**：四路分析只有 mock 规划，Provider 选型与降级策略未定 —— 待确认。
-7. **文档漂移**：[architecture.md](./architecture.md#L53) 的存储路径仍是 `storage/{subject_id}/{session_id}/`，与 capture@1.2 不一致。
-8. **`capture_busy` 暂复用 `code=5000`**（`message=capture_busy`），尚无专用业务码。
+6. **真实模型未接**：四路均为确定性 mock，Provider 选型与降级策略未定 —— 待确认。
+7. **`risk_level` 占位导致默认校验失败**：[generate_overall_risk_level()](../app/analysis/pipeline.py#L29-L32) 返回 `pending`，不在 schema 枚举内；未注入合法值时完整 Schema 校验会返回 `failed`。契约补充五档映射前，调用方必须显式提供风险生成器。
+8. **部署需安装新依赖**：`requirements.txt` 已加入 `jsonschema[format]>=4.23,<5`，本地已安装，其他环境需重新安装。
+9. **文档漂移**：[architecture.md](./architecture.md#L53) 的存储路径仍是 `storage/{subject_id}/{session_id}/`，与 capture@1.2 不一致。
+10. **`capture_busy` 暂复用 `code=5000`**（`message=capture_busy`），尚无专用业务码。
 
 ## 5. 下一步顺序（建议）
 
-1. **analysis-engineer**：实现 `app/analysis/` 四路 Provider + `analysis.schema.json` 校验 + 一致性判定，全部 mock，补 `tests/test_analysis/`。
-2. **grading-engineer**：实现五色规则、七日趋势、合成封顶、工单草案，按 [grading.md](./grading.md) 与 [contracts/grading.md](./contracts/grading.md) 落地，补 `tests/test_grading/`。
-3. **backend-engineer**：补 `/api/user/*`、consent 前置校验、会话归属校验；接入 analyze 与 review 查询。
-4. **fe-user / fe-admin**：先用户端 3 页，再管理端 4 页，严格对齐 ui@1.2（用户端不出现色码）。
-5. **qa-guard + privacy-check**：每轮合并前跑 qa-guard；涉及人脸/音频/心理数据的改动先过 privacy-check。
+1. **grading-engineer**：实现 `app/grading/` 五色规则、七日趋势、合成封顶、工单草案，按 [grading.md](./grading.md) 与 [contracts/grading.md](./contracts/grading.md) 落地，补 `tests/test_grading/`；并把一致性阈值统一到 `app/grading/config.py`。
+2. **backend-engineer**：把 `POST /api/sessions/{id}/analyze` 接入 `app/analysis`（`failed→2003`，`done/degraded` 落库并回写 `transcript_path` / `analysis_json` / `analysis_status`）；补 review 查询与 60 秒频控。
+3. **fe-user / fe-admin**：先用户端 3 页，再管理端 4 页，严格对齐 ui@1.2（用户端不出现色码）。
+4. **qa-guard + privacy-check**：每轮合并前跑 qa-guard；涉及人脸/音频/心理数据的改动先过 privacy-check。
 
 ## 6. 三条红线
 
@@ -163,25 +186,30 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 ```
 Python 3.11.0rc2 · cv2 4.11.0 · numpy 1.26.4 · sounddevice 0.5.6 · mediapipe 0.10.21
 SQLAlchemy 2.1.9（requirements 锁 <2.1）· FastAPI 0.165.0 · uvicorn 0.54.0 · pydantic 2.14.4 · pytest 9.2.0
+jsonschema 4.26.0（含 format 校验依赖）
 ```
 
 ```powershell
-pytest tests -q                                                      # 34 passed
+pytest tests -q                                                      # 106 passed
 python -m app.db.init                                                # 建库（幂等）
 uvicorn app.api.main:app --port 8000                                 # /docs 可访问
 python scripts\seed_demo.py                                          # 演示数据（幂等；--reset 清空后重建）
 python scripts\verify_capture.py --device 0 --seconds 10             # 正式验证 → storage/subjects
 python scripts\verify_capture.py --device 0 --seconds 5 --out storage/_debug   # 调试/自检
+git push origin main                                                 # 远程为 ssh.github.com:443（22 端口被阻断）
 ```
 
-测试构成：`tests/test_capture/` 6 条、`tests/test_db/` 13 条（含 3 条约束负例）、`tests/test_api/` 15 条（含假采集/失败/并发/生产守卫）。
+测试构成：`tests/test_capture/` 6 条、`tests/test_db/` 13 条（含 3 条约束负例）、`tests/test_api/` 32 条（含用户端 / consent / 归属 / 假采集 / 失败 / 并发 / 生产守卫）、`tests/test_analysis/` 55 条（含场景、单模态、降级隔离、Schema、一致性、确定性与隐私）。
 
 ## 9. 待确认清单
 
 - 四路分析的真实 Provider 选型与降级策略；
+- `risk_level` 五档映射与 `text_valence` 的权威来源（当前占位 `pending`）；
+- 一致性阈值从 `app/analysis/config.py` 迁到 `app/grading/config.py` 的适配时机；
+- 是否为 `app/analysis/` 打标签（如 `analysis-v1`）；
 - `architecture.md` 存储路径是否按 capture@1.2 修订；
 - `scripts/` 的目录归属；
-- `capture_busy` 是否在 api@1.5 增补专用错误码；
+- `capture_busy` 是否在 api@1.6 增补专用错误码；
 - 正式验证用的 `subject_id` 目前是固定 UUID（`3b1e7c90-...`），是否保留为演示对象；
 - 是否将本机 SQLAlchemy 重装到 `<2.1` 以彻底消除 M1 现象；
 - `CAPTURE_FAKE` 是否增加 `APP_ENV != production` 守卫。
