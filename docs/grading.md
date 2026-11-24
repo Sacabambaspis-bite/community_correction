@@ -116,10 +116,12 @@ offset_score = (window_signal_mean - baseline.psych_signal_mean)
 
 ```
 step1  final_color = max(single_session_risk, period_trend)      # 按 green<blue<yellow<orange<red
-step2  if consistency == "low":  final_color = min(final_color, orange)
+step2  if consistency == "low":  低一致性封顶（见 5.2）
 step3  if consistency == "low":  manual_review = true
 step4  if degraded == true:      needs_review = true，并计入 R_DEGRADED_REVIEW
 ```
+
+> `step2` 不是简单的 `min(final_color, orange)`，精确语义见 5.2：`red` 豁免，`orange`/`yellow`/`blue` 保持，`green` 抬至 `orange`。
 
 `step4` 不改变 `final_color`，只决定是否建单。因此存在"绿 + 降级"的组合，见第 6 节条件 6。
 
@@ -140,9 +142,19 @@ step4  if degraded == true:      needs_review = true，并计入 R_DEGRADED_REVI
 
 ### 5.2 封顶规则（R_CONSISTENCY_CAP）
 
-- `consistency == "low"` 时 `final_color` 最高为 `orange`；
+`consistency == "low"` 时按当前最终色分档处理：
+
+| 当前色 | 低一致性后 | 说明 |
+|---|---|---|
+| `red` | `red` | 豁免：红来自明确意图，不允许被一致性下调 |
+| `orange` | `orange` | 已在封顶色，保持 |
+| `yellow` | `yellow` | 不高于封顶色，保持 |
+| `blue` | `blue` | 不高于封顶色，保持 |
+| `green` | `orange` | 低一致性下不得结论为「绿」，抬至封顶色并强制人工复核 |
+
 - 该封顶**不作用于 `red`**：红来自明确意图，不允许被一致性下调；
-- 封顶发生时，`rules_fired` 必须包含 `R_CONSISTENCY_CAP`。
+- `green → orange` 是"下限兜底"而非"下调"，用于避免在通道不可信时给出"无风险"结论，处置为 `P0`，与规则 5 一致；
+- 命中封顶（`consistency == "low"` 且当前色非 `red`）时，`rules_fired` 必须包含 `R_CONSISTENCY_CAP`，无论颜色是否实际变化。
 
 ## 6. 复核触发条件
 
@@ -160,7 +172,7 @@ step4  if degraded == true:      needs_review = true，并计入 R_DEGRADED_REVI
 | 9 | 窗口无可用会话 | **否** | — | 返回 `no_session_in_window` |
 | 10 | `R_BASELINE_INSUFFICIENT` 单独命中 | 随蓝一起建单 | `P2` | 7 天内 |
 
-> 命中规则 8 的会话：`consistency` 强制 `low`，`final_color` 上限 `orange`（计算结果为 `red` 时封顶为 `orange`），`rules_fired` 记 `R_CONSISTENCY_CAP`，且**必须生成复核工单**。与规则 6 同时命中时，按规则 8 的 `P0` 建单。
+> 命中规则 8 的会话：`consistency` 强制 `low`，`final_color` 按 5.2 处理（`red` 豁免、不封顶；`green` 抬至 `orange`；其余保持），`rules_fired` 记 `R_CONSISTENCY_CAP`，且**必须生成复核工单**（`suggested_method=recapture`、`P0`）。与规则 6 同时命中时，按规则 8 的 `P0` 建单。
 
 ### 6.1 建议复核方式映射
 
@@ -240,6 +252,8 @@ step4  if degraded == true:      needs_review = true，并计入 R_DEGRADED_REVI
 | `CONSISTENCY_MIN_CONFIDENCE` | 0.6 | 单路置信度下限 | 对比各模型置信度分布 |
 | `CONSISTENCY_CAP_COLOR` | `orange` | 低一致性封顶色 | 需与合规、业务共同确认 |
 
+> 另：analysis 侧 `overall.risk_level` 五档映射由 `app/grading/config.py::map_risk_level` 提供（`RISK_VALENCE_*` 分段 + 明确意图覆写 `crisis`），其阈值同样为未标定，键名与分段见 [contracts/grading.md](./contracts/grading.md) §5；该映射与五色分级相互独立，五色规则不消费 `risk_level`。
+
 ## 10. 版本与变更
 
 | 版本 | 日期 | 变更 |
@@ -247,6 +261,7 @@ step4  if degraded == true:      needs_review = true，并计入 R_DEGRADED_REVI
 | `grading@1.0` | 2026-11-23 | 初版：五色定义、单次与趋势规则、合成封顶、复核触发 |
 | `grading@1.1` | 2026-11-23 | 规则 8 收敛：partial 与单模态强制 `consistency=low`、颜色上限 `orange`、必须建单；无产物会话不建单 |
 | `grading@1.2` | 2026-11-23 | 规则 8 的 `P0` 恢复“同规则 5”引用；v1.2 冻结 |
+| `grading@1.2`（实现补记） | 2026-11-24 | 实现驱动澄清：5.2 低一致性精确语义（`green→orange`、`red` 豁免、蓝/黄/橙保持）、规则 8 的 `red` 不封顶与 `recapture`/`P0` 建单、登记 analysis 侧 `risk_level` 映射；`rule_version` 仍 `grading@1.2`，属附加非破坏变更 |
 
 变更要求：
 

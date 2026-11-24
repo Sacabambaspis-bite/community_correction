@@ -12,6 +12,8 @@
 
 > 本文只写**工程契约**：函数签名、数据结构、配置键、测试矩阵。五色含义、规则语义、阈值标定说明一律以 [../grading.md](../grading.md) 为准，本文不重复定义。
 
+> **v1.2 实现补记（2026-11-24，附加、非破坏）**：随 `app/grading/` 落地（提交 `67adee6`）登记实现驱动新增项——`RuleHit` 可选字段 `offset_score` / `insufficient`、`FinalGrading.review_reason`、`map_risk_level` 与相关配置键、工单 `priority` / `suggested_method` 覆写规则、`build_ticket` 的 `now` 时区校验。规则编号与 `rule_version` 均保持 `grading@1.2` 不变。
+
 ---
 
 ## 1. 模块边界
@@ -59,11 +61,13 @@ class RuleHit:
     field_path: str
     observed_value: float | str | bool
     threshold_key: str
-    threshold_value: float | str
+    threshold_value: float | str | bool | list[str]
     severity: Color
     session_id: Optional[str] = None
     window: Optional[tuple[str, str]] = None
     triggered_at: str = ""
+    offset_score: Optional[float] = None      # 趋势规则证据附加；基线不足时为 0.0
+    insufficient: Optional[str] = None        # 基线/窗口不足原因，供证据标注
 
     def to_evidence(self) -> dict: ...
 
@@ -90,13 +94,16 @@ class FinalGrading:
     rules_fired: list[str]
     evidence: list[dict]
     grading_version: str
+    review_reason: str = "routine_check"      # 建单原因，取值见 §5；不落库，仅影响工单 priority/method
 ```
 
 约束：
 
 - `offset_score` 在 `R_BASELINE_INSUFFICIENT` 命中时置 `0.0`，并在证据里标注 `insufficient`；
 - `evidence` 为 `RuleHit.to_evidence()` 的输出列表，字段名与 [db.md](./db.md) `evidence_json` 一致；
-- 所有 dataclass 均为 `frozen`，规则函数不得修改入参。
+- 所有 dataclass 均为 `frozen`，规则函数不得修改入参；
+- `offset_score` / `insufficient` 为**可选**证据字段，仅在对应规则场景出现，`to_evidence()` 跳过 `None`；
+- `review_reason` 不写入 `review_tickets`（db 无该列），只用于 `build_ticket` 选择 `priority` / `suggested_method`。取值枚举见 §5 `REVIEW_REASON_VALUES`。
 
 ## 3. 规则函数清单
 
@@ -142,14 +149,26 @@ def compose(
     degraded: bool,
     now: str,
 ) -> FinalGrading:
-    """合成：取大 → 低一致性封顶 → 标记复核。
-    `degraded` 由 `analysis_status == "degraded"` 得到，仅表示分析降级；采集降级不走此参数。"""
+    """合成：取大 → 低一致性封顶 → 标记复核。严格按 grading.md §5 四步，顺序不得调换。
+    `degraded` 由 `analysis_status == "degraded"` 得到，仅表示分析降级；采集降级不走此参数。
+
+    低一致性封顶（`consistency == "low"`，见 grading.md §5.2）：
+    - `red` 豁免，保持 `red`；
+    - `orange` / `yellow` / `blue` 保持原色（本就不高于封顶色）；
+    - `green` 抬至 `orange`（低一致性下不得结论为「绿」，强制人工复核）。
+    命中封顶时 `rules_fired` 必含 `R_CONSISTENCY_CAP`。"""
 
 
 def build_ticket(final: FinalGrading, review_id: str, subject_id: str, now: str) -> dict:
-    """生成工单草案，字段与 db.md 的 review_tickets 对齐。
+    """生成工单草案，字段与 db.md 的 review_tickets 对齐（不含 `review_reason`，db 无该列）。
     仅当 final_color == "green" 且 needs_review == false 时抛 ValueError；
-    「绿 + 降级」(R_DEGRADED_REVIEW) 属于允许建单的组合。"""
+    「绿 + 降级」(R_DEGRADED_REVIEW) 与 `review_reason == "capture_degraded"` 属于允许建单的组合。
+    `now` 必须为带时区 ISO 时间，否则抛 ValueError("now_must_be_timezone_aware")。"""
+
+
+def map_risk_level(text_valence: float, intent_flag: str = "none") -> str:
+    """analysis 侧 `overall.risk_level` 五档映射（历史遗留），阈值见 §5。
+    五色规则**不消费**该函数；`intent_flag` 指向明确意图时强制覆写为 `crisis`。"""
 ```
 
 ### 4.1 编排顺序（不得调换）
@@ -166,25 +185,59 @@ evaluate_session → evaluate_period → compose → build_ticket
 |---|---|
 | `analysis` 缺 `channels.psych` | 抛 `ValueError("missing_psych_channel")` |
 | `analysis` 未通过 schema 校验 | 由调用方拦截；本模块仍做必填键检查 |
-| `build_ticket` 传入绿结果 | 绿且 `needs_review=false` 时抛 `ValueError("ticket_not_allowed_for_green")` |
-| 阈值配置缺失 | 启动期校验，缺失即 `KeyError`，不做默认兜底 |
+| `build_ticket` 传入绿结果 | 绿且 `needs_review=false` 且 `review_reason != "capture_degraded"` 时抛 `ValueError("ticket_not_allowed_for_green")` |
+| `build_ticket` 的 `now` 无时区 | 抛 `ValueError("now_must_be_timezone_aware")` |
+| 阈值配置缺失 | 启动期 `validate_config()` 校验，缺失即 `KeyError`，不做默认兜底 |
+
+### 4.3 `review_reason` 与规则 8 接线
+
+`AnalysisResult` 不含 `capture_status`（schema `additionalProperties: false`），grading 无法自行判定规则 8。`compose` 不新增入参，仅给出默认 `review_reason`：
+
+| 条件 | `compose` 默认 `review_reason` |
+|---|---|
+| `degraded == true` | `analysis_degraded` |
+| 否则 `consistency == "low"` | `consistency_conflict` |
+| 其余 | `routine_check` |
+
+- 调用方（backend）在已知 `capture_status in (partial, no_face, no_audio)` 时，须用 `dataclasses.replace(final, review_reason="capture_degraded")` 覆写后再 `build_ticket`；
+- `build_ticket` 见 `review_reason == "capture_degraded"` 时，`priority` 覆写为 `P0`、`suggested_method` 覆写为 `recapture`，且不受「绿 + 不复核」拒单守卫拦截。
 
 ## 5. `config.py` 配置键
 
 ```python
 THRESHOLD_PROFILE = "default@v1"
+RULE_VERSION = "grading@1.2"
 
 THRESHOLDS: dict[str, float | str] = {
-    "SINGLE_RED_SELFHARM_SIGNAL": 80,      # TODO: 待标定
-    "SINGLE_ORANGE_SIGNAL_MIN": 70,        # TODO: 待标定
-    "TREND_BLUE_OFFSET_MIN": 0.8,          # TODO: 待标定
-    "TREND_YELLOW_OFFSET_MIN": 1.5,        # TODO: 待标定
-    "BASELINE_MIN_SAMPLES": 3,             # TODO: 待标定
-    "BASELINE_MIN_STD": 1.0,               # TODO: 待标定
-    "TREND_MIN_SESSIONS": 2,               # TODO: 待标定
-    "CONSISTENCY_MIN_CONFIDENCE": 0.6,     # TODO: 待标定
-    "CONSISTENCY_CAP_COLOR": "orange",     # TODO: 待标定
+    # 单次红
+    "SINGLE_RED_INTENT_FLAG": "suicide_intent",              # TODO: 待标定
+    "SINGLE_RED_SELFHARM_INTENT_FLAG": "self_harm_mention",  # TODO: 待标定
+    "SINGLE_RED_SELFHARM_SIGNAL": 80,                        # TODO: 待标定
+    # 单次橙
+    "SINGLE_ORANGE_SIGNAL_MIN": 70,                          # TODO: 待标定
+    # 趋势偏移
+    "TREND_BLUE_OFFSET_MIN": 0.8,                            # TODO: 待标定
+    "TREND_YELLOW_OFFSET_MIN": 1.5,                          # TODO: 待标定
+    # 基线 / 窗口
+    "BASELINE_MIN_SAMPLES": 3,                               # TODO: 待标定
+    "BASELINE_MIN_STD": 1.0,                                 # TODO: 待标定
+    "TREND_MIN_SESSIONS": 2,                                 # TODO: 待标定
+    # 一致性
+    "CONSISTENCY_MIN_CONFIDENCE": 0.6,                       # TODO: 待标定
+    "CONSISTENCY_CAP_COLOR": "orange",                       # TODO: 待标定
+    # map_risk_level 分段（analysis 侧 overall.risk_level，非五色）
+    "RISK_VALENCE_NONE_MIN": 0.0,                            # TODO: 待标定
+    "RISK_VALENCE_WATCH_MIN": -0.2,                          # TODO: 待标定
+    "RISK_VALENCE_ELEVATED_MIN": -0.5,                       # TODO: 待标定
+    "RISK_VALENCE_HIGH_MIN": -0.8,                           # TODO: 待标定
 }
+
+# 非数值常量
+ORANGE_AUX_FACE_EXPRESSIONS = ("sad", "anxious")
+ORANGE_AUX_EMOTION_LABEL = "strong_negative"
+RISK_INTENT_CRISIS_FLAGS = ("suicide_intent", "self_harm_mention")
+REVIEW_REASON_VALUES = ("routine_check", "capture_degraded", "consistency_conflict", "analysis_degraded")
+COLOR_RANK = {"none": 0, "green": 1, "blue": 2, "yellow": 3, "orange": 4, "red": 5}
 
 DEADLINE_HOURS: dict[str, int] = {"P0": 24, "P1": 72, "P2": 168}
 
@@ -195,6 +248,19 @@ SUGGESTED_METHOD: dict[str, str] = {
     "blue": "routine_checkin",
 }
 ```
+
+`map_risk_level(text_valence, intent_flag="none")` 分段（全部未标定）：
+
+| 条件 | `risk_level` |
+|---|---|
+| `intent_flag in ("suicide_intent", "self_harm_mention")` | `crisis`（强制覆写，最高优先） |
+| `text_valence >= 0.0` | `none` |
+| `-0.2 <= text_valence < 0.0` | `watch` |
+| `-0.5 <= text_valence < -0.2` | `elevated` |
+| `-0.8 <= text_valence < -0.5` | `high` |
+| `text_valence < -0.8` | `crisis` |
+
+> 该函数仅供 analysis 侧填充 `overall.risk_level`；五色分级不消费 `risk_level`。
 
 规则：
 
@@ -212,7 +278,7 @@ SUGGESTED_METHOD: dict[str, str] = {
   "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
   "status": "pending",
   "priority": "P2",
-  "due_at": "2026-11-30T15:20:00+08:00",
+  "due_at": "2026-11-30T15:20:00.000+08:00",
   "triggered_rules": ["R_TREND_BLUE"],
   "evidence_json": [
     {
@@ -233,13 +299,16 @@ SUGGESTED_METHOD: dict[str, str] = {
 }
 ```
 
-`priority` 取值规则见 [../grading.md](../grading.md#6-复核触发条件)，映射表：
+`priority` / `suggested_method` 取值规则见 [../grading.md](../grading.md#6-复核触发条件)。注意输出**不含** `review_reason`（db 无该列），它只在 `FinalGrading` 内部影响下表选择：
 
-| 最终色 / 条件 | priority |
-|---|---|
-| `red` / `orange` / 低一致性 | `P0` |
-| `yellow` / 降级补采 | `P1` |
-| `blue` | `P2` |
+| 最终色 / 条件 | priority | suggested_method |
+|---|---|---|
+| `review_reason == "capture_degraded"`（规则 8，覆写） | `P0` | `recapture` |
+| `red` / `orange` / 低一致性 | `P0` | 按最终色 |
+| `yellow` / 分析降级补采（绿 + `degraded`） | `P1` | 按最终色 / `recapture` |
+| `blue` | `P2` | `routine_checkin` |
+
+`due_at = now + DEADLINE_HOURS[priority]`，保持时区、输出毫秒精度 ISO；相同输入必须输出一致（幂等，不含随机值）。
 
 ## 7. pytest 覆盖矩阵
 
@@ -257,10 +326,12 @@ SUGGESTED_METHOD: dict[str, str] = {
 | 基线不足 | `R_BASELINE_INSUFFICIENT` | `sample_count=2` → 蓝 |
 | 窗口会话不足 | `R_BASELINE_INSUFFICIENT` | 1 条会话 → 蓝 |
 | 标准差为零 | 趋势 | `std=0` 时用 `BASELINE_MIN_STD`，不除零 |
-| 封顶 | `R_CONSISTENCY_CAP` | 红+low 仍红；橙+low 仍橙；黄+low 仍黄；绿+low 变橙 |
+| 封顶 | `R_CONSISTENCY_CAP` | 红+low 仍红；橙+low 仍橙；黄+low 仍黄；蓝+low 仍蓝；绿+low 变橙 |
 | 取大 | `compose` | 六组组合对照 grading.md §5.1 |
 | 复核标记 | `compose` | `low` 必 `manual_review=True`；`degraded` 必 `needs_review=True` |
-| 采集降级 | 规则 8 | `capture_status in (partial,no_face,no_audio)` → `consistency=low`、`final_color<=orange`、必建 `P0` 单 |
+| 采集降级 | 规则 8 | `capture_status in (partial,no_face,no_audio)` → `consistency=low`、`review_reason=capture_degraded`、必建 `P0` 单；封顶对 `red` 豁免（`red` 保持） |
+| 工单覆写 | `build_ticket` | `review_reason=capture_degraded` → `P0`+`recapture`；即便最终绿也不抛 `ticket_not_allowed_for_green` |
+| risk_level 映射 | `map_risk_level` | 五档断点；`text_valence` 正常但 `intent_flag=suicide_intent` → `crisis` |
 | 绿 + 降级 | `R_DEGRADED_REVIEW` | 最终绿且 `degraded=True` 时仍建单，`priority=P1` |
 | 建单 | `build_ticket` | 绿且 `needs_review=False` 抛异常；「绿 + 降级」不抛；非绿字段齐全；`due_at` 按 P 级计算 |
 | 跨月窗口 | `evaluate_period` | `2026-01-28 ~ 2026-02-03` 正常计算 |
@@ -281,4 +352,5 @@ def test_red_boundary(signal, expected): ...
 4. 绿结果且 `needs_review=false` 时生成工单（「绿 + 降级」除外）；
 5. 证据缺 `field_path` 或 `threshold_key`；
 6. 输出诊断性字段（如 `depression_score`）；
-7. 规则函数使用随机数或当前时间作为逻辑输入（时间只能进 `triggered_at`）。
+7. 规则函数使用随机数或当前时间作为逻辑输入（时间只能进 `triggered_at`）；
+8. 把 `review_reason` 写入 `review_tickets` 或任何用户端响应（它只在进程内影响工单 `priority` / `suggested_method`）。
