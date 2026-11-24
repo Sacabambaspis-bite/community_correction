@@ -2,12 +2,12 @@
 
 | 项 | 值 |
 |---|---|
-| 契约版本 | `api@1.4` |
+| 契约版本 | `api@1.5` |
 | 所有者 | backend-engineer（`app/api/`） |
 | 基础路径 | `/api` |
 | 关联 | [db.md](./db.md)、[capture.md](./capture.md)、[analysis.schema.json](./analysis.schema.json)、[ui.md](./ui.md) |
 
-> v1.4 已冻结，后续仅接受实现驱动的变更。本版将信封改为 `{code, message, data, degraded, request_id}`（业务码 HTTP 200、未捕获异常 HTTP 500），并统一路由为 `/api/sessions` + `/api/admin/*` + `/api/user/*`。
+> v1.5 已冻结，后续仅接受实现驱动的变更。本版落地 `/api/user/*`、subject 会话归属校验与 consent 前置三闸；信封沿用 v1.4 的 `{code, message, data, degraded, request_id}`（业务码 HTTP 200、未捕获异常 HTTP 500），路由统一为 `/api/sessions` + `/api/admin/*` + `/api/user/*`。
 
 ---
 
@@ -103,7 +103,8 @@ Authorization: Bearer <token>
 - `GET /api/health` 无需鉴权；
 - 令牌为静态值直接比较，不要求前缀；缺失或格式错误返回 `1002`，角色不符返回 `1003`；
 - 非生产环境未设置环境变量时使用缺省 demo 值并在启动日志打 `WARNING`；
-- `APP_ENV=production` 时，`USER_TOKEN` / `ADMIN_TOKEN` 未配置或仍等于 `user_demo` / `admin_demo`，启动直接抛 `RuntimeError`，不提供默认值。
+- `APP_ENV=production` 时，`USER_TOKEN` / `ADMIN_TOKEN` 未配置或仍等于 `user_demo` / `admin_demo`，启动直接抛 `RuntimeError`，不提供默认值；
+- 原型阶段 `subject` 身份由客户端显式声明 `subject_id`（`PUT` / `POST revoke` 在 body，`GET` 在 query `?subject_id=`），后端据此做会话归属校验；`staff` 无需声明、跳过归属校验。
 
 ## 5. 端点清单
 
@@ -127,10 +128,10 @@ Authorization: Bearer <token>
 
 | 方法 | 路径 | 状态 | 说明 |
 |---|---|---|---|
-| `GET` | `/api/user/consent` | 未实现 | 查询本人同意状态 |
-| `PUT` | `/api/user/consent` | 未实现 | 提交同意（人脸、音频独立勾选） |
-| `POST` | `/api/user/consent/revoke` | 未实现 | 撤回同意 |
-| `GET` | `/api/user/sessions/{session_id}/feedback` | 未实现 | 中性结果反馈（不含色码） |
+| `GET` | `/api/user/consent` | 已实现 | 查询本人同意状态 |
+| `PUT` | `/api/user/consent` | 已实现 | 提交同意（人脸、音频独立勾选） |
+| `POST` | `/api/user/consent/revoke` | 已实现 | 撤回同意 |
+| `GET` | `/api/user/sessions/{session_id}/feedback` | 已实现 | 中性结果反馈（不含色码） |
 
 ### 5.4 管理端（`/api/admin/*`，需 `staff`）
 
@@ -165,7 +166,39 @@ Authorization: Bearer <token>
 
 ## 7. 端点详情
 
-### 7.1 `PUT /api/user/consent`（未实现）
+### 7.1 `/api/user/consent` 系列（GET / PUT / revoke）
+
+三个端点均要求 `subject` 角色（`staff` 调用返回 `1003`）；`subject_id`：`PUT` / `revoke` 在 body，`GET` 在 query `?subject_id=`。对象不存在返回 `1004`。`PUT` 成功写一条 `audit_logs(action=consent.grant)`，`revoke` 成功写一条 `audit_logs(action=consent.revoke)`，`detail_json` 不含敏感信息。
+
+`consent_json` 结构与 [db.md §2.1](./db.md) 一致：`schema_version`、`general`、`face`、`audio`、`revoked_at`、`retention_days`。
+
+#### 7.1.1 `GET /api/user/consent`
+
+```bash
+curl "http://localhost:8000/api/user/consent?subject_id=3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c" \
+  -H "Authorization: Bearer user_demo"
+```
+
+尚未同意时返回全 `granted: false`、`at: null`、`revoked_at: null`、`retention_days: null`：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
+    "general": { "granted": false, "at": null },
+    "face": { "granted": false, "at": null },
+    "audio": { "granted": false, "at": null },
+    "revoked_at": null,
+    "retention_days": null
+  },
+  "degraded": [],
+  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
+}
+```
+
+#### 7.1.2 `PUT /api/user/consent`
 
 ```bash
 curl -X PUT http://localhost:8000/api/user/consent \
@@ -195,6 +228,41 @@ curl -X PUT http://localhost:8000/api/user/consent \
   "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
 }
 ```
+
+- 入参：`subject_id`（body）、`face`（bool）、`audio`（bool）、`retention_days`（int，≥1）；
+- `face` 与 `audio` 至少一项为 `true`，否则 `1001`；`general.granted = face or audio`（同意任一模态即视为总体同意；缺失模态由 7.2 的 `consent_incomplete` 闸拦截）；
+- 成功后覆写 `subjects.consent_json`，`at` 取服务端当前时间，`revoked_at` 置 `null`。
+
+#### 7.1.3 `POST /api/user/consent/revoke`
+
+```bash
+curl -X POST http://localhost:8000/api/user/consent/revoke \
+  -H "Authorization: Bearer user_demo" \
+  -H "Content-Type: application/json" \
+  -d '{ "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c" }'
+```
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
+    "general": { "granted": true, "at": "2026-11-23T10:00:00+08:00" },
+    "face": { "granted": true, "at": "2026-11-23T10:00:00+08:00" },
+    "audio": { "granted": true, "at": "2026-11-23T10:00:00+08:00" },
+    "revoked_at": "2026-11-24T09:00:00+08:00",
+    "retention_days": 180
+  },
+  "degraded": [],
+  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
+}
+```
+
+- 入参：`subject_id`（body）；
+- 从未同意（`consent_json` 为空）时撤回返回 `1005`、`message=consent_not_granted`；
+- 已撤回再次撤回幂等：`revoked_at` 保持首次撤回时间，不重复写留痕；
+- 撤回后 `POST /api/sessions` 拒绝发起新采集（见 7.2）。
 
 ### 7.2 `POST /api/sessions`
 
@@ -242,15 +310,18 @@ curl -X POST http://localhost:8000/api/sessions \
 }
 ```
 
-前置校验（本轮骨架仅实现 `subject_id` 存在性；consent 与 60 秒频控延期）：
+前置校验：
 
 | 条件 | 失败返回 |
 |---|---|
-| `subject_id` 不存在 | `1004` |
 | 同时已有采集任务 | `5000`，`message=capture_busy` |
-| `consent.general.granted != true` | `1005`，`message=consent_required`（未实现） |
-| `revoked_at != null` | `1005`，`message=consent_revoked`（未实现） |
+| `subject_id` 不存在 | `1004` |
+| `consent.revoked_at != null` | `1005`，`message=consent_revoked` |
+| `consent.general.granted != true` | `1005`，`message=consent_required` |
+| `consent.face.granted != true` 或 `consent.audio.granted != true` | `1005`，`message=consent_incomplete` |
 | 60 秒内重复请求 | `1006`（未实现） |
+
+校验顺序：并发闸 → `subject_id` 存在 → consent 三道闸（`revoked` → `general` → `face/audio`）。consent 任一命中即返回，不创建会话、不写库。三道 consent 闸与 [db.md §2.1](./db.md) 对齐，消除历史不一致。
 
 ### 7.3 `GET /api/sessions/{session_id}`
 
@@ -340,7 +411,8 @@ curl http://localhost:8000/api/sessions/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f \
 - `coverage` 只能来自 `CaptureSession.coverage` 派生属性，API 层不得重新推导；
 - `face_available` / `audio_available` 由 `face_path` / `audio_path` 是否非空决定；
 - 响应只给相对 `face_path` 语义的可用性标记，不返回路径本身、不返回音频或图像二进制；
-- `code` 判定：`status == failed` → `2001`（`message=capture_failed`）；否则 `analysis_status == failed` → `2003`（`message=analysis_failed`）；其余 `code=0`；两种失败都仍返回会话摘要便于展示 `codes`。
+- `code` 判定：`status == failed` → `2001`（`message=capture_failed`）；否则 `analysis_status == failed` → `2003`（`message=analysis_failed`）；其余 `code=0`；两种失败都仍返回会话摘要便于展示 `codes`；
+- 归属校验：`subject` 角色调用时必须带 query `subject_id`，且 `session.subject_id == subject_id`，否则 `1003`；缺 `subject_id` 返回 `1001`。`staff` 角色无需 `subject_id`、跳过归属校验。
 
 ### 7.4 `POST /api/sessions/{session_id}/analyze`（占位）
 
@@ -452,7 +524,7 @@ curl "http://localhost:8000/api/admin/sessions?subject_id=3b1e7c90-2f4a-4d51-8c6
 }
 ```
 
-### 7.8 `GET /api/user/sessions/{session_id}/feedback`（未实现）
+### 7.8 `GET /api/user/sessions/{session_id}/feedback`
 
 ```json
 {
@@ -472,6 +544,20 @@ curl "http://localhost:8000/api/admin/sessions?subject_id=3b1e7c90-2f4a-4d51-8c6
 
 `suggestion` 枚举：`keep_routine` / `talk_to_staff` / `recapture`。
 **不得出现**色码、规则编号、分数、诊断词。
+
+- 需 `subject` 角色，必须带 query `subject_id` 且 `session.subject_id == subject_id`，否则 `1003`；缺 `subject_id` 返回 `1001`；会话不存在返回 `1004`；
+- `grading` 未接入前，`suggestion` / `summary_text` / `next_action` 由采集状态确定性映射（中性，不含任何色码/规则/分数/诊断）：
+
+| `status` / `capture_status` | `suggestion` | `summary_text` | `next_action` |
+|---|---|---|---|
+| `created` | `keep_routine` | 本次记录仍在进行中。 | 请稍候，完成后可查看结果 |
+| `captured` / `ok` | `keep_routine` | 本次记录已完成。 | 下次按约定时间再来即可 |
+| `captured` / `partial` | `keep_routine` | 本次记录已完成。 | 结果已转工作人员复核，按约定时间再来即可 |
+| `captured` / `no_face`、`no_audio`、`no_face_no_audio` | `recapture` | 本次记录已完成。 | 建议稍后重新采集一次 |
+| `failed` / `error` | `talk_to_staff` | 本次记录未完成。 | 设备暂时不可用，请联系工作人员 |
+| `failed` / 其他 | `recapture` | 本次记录未完成。 | 建议稍后重新采集一次 |
+
+- `grading` 就绪后，`suggestion` 改由复盘结果派生，但脱敏边界（仅返回 `status` / `summary_text` / `suggestion` / `next_action`）保持不变。
 
 ### 7.9 `GET /api/admin/reviews/{review_id}`（未实现）
 
@@ -605,3 +691,4 @@ mock 数据必须与本节示例字段完全一致，不得增删字段。
 | 1.0 | 2026-11-23 | 初版 |
 | 1.3 | 2026-11-23 | 补 `created` 会话不可分析、不计入复盘 |
 | 1.4 | 2026-11-23 | 信封改为 `{code,message,data,degraded,request_id}`（中间件 uuid4 + `X-Request-Id` + 日志/audit）；业务码 HTTP 200、未捕获异常 HTTP 500；路由统一为 `/api/sessions` + `/api/admin/*` + `/api/user/*`；`POST /api/sessions` 改异步 + 轮询；新增 `4000`；`5000` 增加 `analysis_pipeline_not_ready` / `capture_busy` 临时语义；鉴权改为 `USER_TOKEN` / `ADMIN_TOKEN`，`APP_ENV=production` 缺配置直接启动失败 |
+| 1.5 | 2026-11-24 | 落地 `/api/user/*`（consent 查询/提交/撤回、feedback）；明确 subject 身份由客户端声明 `subject_id`（GET 走 query、写操作走 body）+ 会话归属校验（越权 `1003`）；`POST /api/sessions` 补齐 consent 三道闸（`revoked` → `general` → `face/audio`），新增 `consent_incomplete`，消除 db.md §2.1 与 api 不一致；`feedback` 在 grading 就绪前用采集状态做中性映射；60s 频控（1006）、analyze 接入、review 查询仍延期 |

@@ -11,11 +11,17 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.api import deps
-from app.api.deps import get_db, require_admin, require_any_subject_or_staff
+from app.api.deps import (
+    enforce_session_owner,
+    get_db,
+    require_admin,
+    require_any_subject_or_staff,
+)
+from app.api.routers.user import require_consent
 from app.api.errors import (
     ANALYSIS_FAILED,
     CAPTURE_FAILED,
@@ -169,6 +175,8 @@ def create_session(
         subject = db.get(Subject, payload.subject_id)
         if subject is None:
             raise BizError(NOT_FOUND, "subject_not_found")
+        # 并发闸 → subject 存在 → consent 三道闸（api.md §7.2）。
+        require_consent(subject)
 
         session_id = str(uuid.uuid4())
         now = _now()
@@ -200,12 +208,14 @@ def create_session(
 @router.get("/sessions/{session_id}")
 def get_session(
     session_id: str,
+    subject_id: Optional[str] = Query(default=None),
     _role: str = Depends(require_any_subject_or_staff),
     db: Session = Depends(get_db),
 ) -> dict:
     session = db.get(CaptureSession, session_id)
     if session is None:
         raise BizError(NOT_FOUND, "not_found")
+    enforce_session_owner(session, _role, subject_id)
 
     degraded = degraded_flags(session.capture_status, session.analysis_status)
     data = SessionOut(

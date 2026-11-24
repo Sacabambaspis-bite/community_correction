@@ -1,8 +1,8 @@
-"""pydantic v2 请求与响应模型，字段与 api@1.4 示例逐字对齐。"""
+"""pydantic v2 请求与响应模型，字段与 api@1.5 示例逐字对齐。"""
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -88,3 +88,39 @@ class SessionListOut(BaseModel):
     page: int
     page_size: int
     total: int
+
+
+# ---- 用户端同意与反馈（api@1.5 §5.3 / §7.1 / §7.8）----
+
+
+class ConsentScope(BaseModel):
+    granted: bool
+    at: Optional[str] = None
+
+
+class ConsentOut(BaseModel):
+    subject_id: str
+    general: ConsentScope
+    face: ConsentScope
+    audio: ConsentScope
+    revoked_at: Optional[str] = None
+    retention_days: Optional[int] = None
+
+
+class ConsentGrantRequest(BaseModel):
+    subject_id: str = Field(..., min_length=1, max_length=64)
+    face: bool
+    audio: bool
+    retention_days: int = Field(..., ge=1)
+
+
+class ConsentRevokeRequest(BaseModel):
+    subject_id: str = Field(..., min_length=1, max_length=64)
+
+
+class FeedbackOut(BaseModel):
+    session_id: str
+    status: str
+    summary_text: str
+    suggestion: Literal["keep_routine", "talk_to_staff", "recapture"]
+    next_action: str

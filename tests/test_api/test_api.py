@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 
@@ -33,6 +34,22 @@ def _add_subject(db_factory, subject_id: str = _SUBJECT_ID) -> None:
                 updated_at=_UPDATED_AT,
             )
         )
+        db.commit()
+
+
+def _grant_consent(db_factory, subject_id: str = _SUBJECT_ID) -> None:
+    """写入完整同意（general/face/audio 均授权，未撤回），供采集类用例前置。"""
+    consent = {
+        "schema_version": "consent@1.0",
+        "general": {"granted": True, "at": _CREATED_AT},
+        "face": {"granted": True, "at": _CREATED_AT},
+        "audio": {"granted": True, "at": _CREATED_AT},
+        "revoked_at": None,
+        "retention_days": 180,
+    }
+    with db_factory() as db:
+        subject = db.get(Subject, subject_id)
+        subject.consent_json = json.dumps(consent)
         db.commit()
 
 
@@ -90,7 +107,9 @@ def test_partial_session_marks_capture_degraded(client, db_factory, user_headers
         codes='["no_face"]',
     )
 
-    response = client.get(f"/api/sessions/{session_id}", headers=user_headers)
+    response = client.get(
+        f"/api/sessions/{session_id}?subject_id={_SUBJECT_ID}", headers=user_headers
+    )
     body = response.json()
     assert response.status_code == 200
     assert body["code"] == 0
@@ -120,7 +139,9 @@ def test_failed_session_returns_2001(client, db_factory, user_headers):
         captured_at=None,
     )
 
-    response = client.get(f"/api/sessions/{session_id}", headers=user_headers)
+    response = client.get(
+        f"/api/sessions/{session_id}?subject_id={_SUBJECT_ID}", headers=user_headers
+    )
     body = response.json()
     assert response.status_code == 200
     assert body["code"] == 2001
@@ -143,7 +164,9 @@ def test_analysis_failed_returns_2003(client, db_factory, user_headers):
         codes="[]",
     )
 
-    response = client.get(f"/api/sessions/{session_id}", headers=user_headers)
+    response = client.get(
+        f"/api/sessions/{session_id}?subject_id={_SUBJECT_ID}", headers=user_headers
+    )
     body = response.json()
     assert response.status_code == 200
     assert body["code"] == 2003
@@ -278,6 +301,7 @@ def test_create_session_fake_capture_success(
 ):
     monkeypatch.setattr(deps_module, "get_session_factory", lambda: db_factory)
     _add_subject(db_factory)
+    _grant_consent(db_factory)
 
     created = client.post(
         "/api/sessions", json={"subject_id": _SUBJECT_ID}, headers=user_headers
@@ -287,7 +311,9 @@ def test_create_session_fake_capture_success(
     assert body["data"]["status"] == "created"
     session_id = body["data"]["session_id"]
 
-    detail = client.get(f"/api/sessions/{session_id}", headers=user_headers)
+    detail = client.get(
+        f"/api/sessions/{session_id}?subject_id={_SUBJECT_ID}", headers=user_headers
+    )
     payload = detail.json()
     assert payload["code"] == 0
     assert payload["degraded"] == []
@@ -310,6 +336,7 @@ def test_capture_failure_persists_and_does_not_leak_path(
 
     monkeypatch.setattr(sessions_router, "_capture_result", boom)
     _add_subject(db_factory)
+    _grant_consent(db_factory)
     caplog.set_level(logging.INFO, logger="app.api")
 
     created = client.post(
@@ -318,7 +345,7 @@ def test_capture_failure_persists_and_does_not_leak_path(
     session_id = created.json()["data"]["session_id"]
 
     payload = client.get(
-        f"/api/sessions/{session_id}", headers=user_headers
+        f"/api/sessions/{session_id}?subject_id={_SUBJECT_ID}", headers=user_headers
     ).json()
     assert payload["code"] == 2001
     assert payload["data"]["status"] == "failed"
@@ -344,3 +371,87 @@ def test_create_session_returns_capture_busy_when_lock_held(
     assert response.status_code == 200
     assert body["code"] == 5000
     assert body["message"] == "capture_busy"
+
+
+def _set_consent(db_factory, consent: dict, subject_id: str = _SUBJECT_ID) -> None:
+    with db_factory() as db:
+        subject = db.get(Subject, subject_id)
+        subject.consent_json = json.dumps(consent)
+        db.commit()
+
+
+def _consent_payload(*, face: bool, audio: bool, revoked_at=None) -> dict:
+    return {
+        "schema_version": "consent@1.0",
+        "general": {"granted": face or audio, "at": _CREATED_AT},
+        "face": {"granted": face, "at": _CREATED_AT},
+        "audio": {"granted": audio, "at": _CREATED_AT},
+        "revoked_at": revoked_at,
+        "retention_days": 180,
+    }
+
+
+def test_create_session_requires_consent(client, db_factory, user_headers):
+    _add_subject(db_factory)
+
+    response = client.post(
+        "/api/sessions", json={"subject_id": _SUBJECT_ID}, headers=user_headers
+    )
+    body = response.json()
+    assert body["code"] == 1005
+    assert body["message"] == "consent_required"
+
+    with db_factory() as db:
+        assert db.scalars(select(CaptureSession)).all() == []
+
+
+def test_create_session_rejects_revoked_consent(client, db_factory, user_headers):
+    _add_subject(db_factory)
+    _set_consent(
+        db_factory,
+        _consent_payload(face=True, audio=True, revoked_at=_UPDATED_AT),
+    )
+
+    response = client.post(
+        "/api/sessions", json={"subject_id": _SUBJECT_ID}, headers=user_headers
+    )
+    body = response.json()
+    assert body["code"] == 1005
+    assert body["message"] == "consent_revoked"
+
+    with db_factory() as db:
+        assert db.scalars(select(CaptureSession)).all() == []
+
+
+def test_create_session_rejects_incomplete_consent(client, db_factory, user_headers):
+    _add_subject(db_factory)
+    _set_consent(db_factory, _consent_payload(face=True, audio=False))
+
+    response = client.post(
+        "/api/sessions", json={"subject_id": _SUBJECT_ID}, headers=user_headers
+    )
+    body = response.json()
+    assert body["code"] == 1005
+    assert body["message"] == "consent_incomplete"
+
+    with db_factory() as db:
+        assert db.scalars(select(CaptureSession)).all() == []
+
+
+def test_session_ownership_enforced(
+    client, db_factory, user_headers, admin_headers
+):
+    _add_subject(db_factory)
+    session_id = "6c7d8e9f-0a1b-4c2d-8e3f-4a5b6c7d8e9f"
+    _add_session(db_factory, session_id, capture_status="ok")
+
+    other = "9f1e2d3c-4b5a-4697-8877-665544332211"
+    forbidden = client.get(
+        f"/api/sessions/{session_id}?subject_id={other}", headers=user_headers
+    ).json()
+    assert forbidden["code"] == 1003
+    assert forbidden["message"] == "forbidden"
+
+    staff = client.get(f"/api/sessions/{session_id}", headers=admin_headers)
+    assert staff.status_code == 200
+    assert staff.json()["code"] == 0

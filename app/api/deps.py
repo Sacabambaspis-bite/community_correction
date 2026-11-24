@@ -8,7 +8,7 @@ from typing import Iterator, Optional
 from fastapi import Depends, Header
 from sqlalchemy.orm import Session
 
-from app.api.errors import FORBIDDEN, UNAUTHENTICATED, BizError
+from app.api.errors import FORBIDDEN, INVALID_REQUEST, UNAUTHENTICATED, BizError
 from app.db.database import SessionLocal
 
 _ENV_USER_TOKEN = os.environ.get("USER_TOKEN") or None
@@ -95,3 +95,17 @@ def require_admin(role: str = Depends(_resolve_role)) -> str:
 def require_any_subject_or_staff(role: str = Depends(_resolve_role)) -> str:
     """用户端或管理端均可。"""
     return role
+
+
+def enforce_session_owner(session, role: str, subject_id: Optional[str]) -> None:
+    """会话归属校验（api.md §7.3 / §7.8）。
+
+    - `staff` 角色跳过；
+    - `subject` 角色必须声明 `subject_id`，缺失返回 `1001`，不匹配返回 `1003`。
+    """
+    if role == ROLE_STAFF:
+        return
+    if not subject_id:
+        raise BizError(INVALID_REQUEST, "invalid_request")
+    if session.subject_id != subject_id:
+        raise BizError(FORBIDDEN, "forbidden")
