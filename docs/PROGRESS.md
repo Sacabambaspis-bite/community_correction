@@ -1,6 +1,6 @@
 # 项目进度（PROGRESS）
 
-> 生成时间：2026-11-24 · 基准提交：`67adee6`（`origin/main` 仍为 `4f5d1bf`，本地领先 1 个提交未推送）· 依据：`git log`、`git tag`、`pytest` 实测、[QA 报告](./reports/qa-2026-11-24.md)。
+> 生成时间：2026-11-24 · 基准提交：`337fdb9`（`main` 与 `origin/main` 同步）· 依据：`git log`、`git tag`、`pytest` 实测、[QA 报告](./reports/qa-2026-11-24.md)。
 > 本文只记录仓库里可核实的事实；尚未实现或未定稿的内容标注「待确认」。
 
 ## 1. 项目定位与技术栈
@@ -40,13 +40,14 @@
 | `tests/test_analysis/`（55 条） | 全绿 | `81a8499` |
 | `app/grading/` 五色规则、七日趋势偏移、合成封顶、工单草案 | 已实现（未接入 API、未打标签） | `67adee6` |
 | `tests/test_grading/`（106 条） | 全绿 | `67adee6` |
-| 远程仓库 | `origin/main` @ `4f5d1bf`；本地领先 1 个提交未推送 | `67adee6`（本地） |
+| 远程仓库 | 已推送，`main` 与 `origin/main` 同步 | `origin/main` @ `337fdb9` |
 | `scripts/seed_demo.py` 演示数据（含占位素材） | 已实现 | `0bb78b5` |
 | QA 核验 + M1–M4/L4/L8 修复 | 已完成 | `638245e`（报告）、`7732930`（修复） |
 
-提交历史（近 15 条）：
+提交历史（近 16 条）：
 
 ```
+337fdb9  docs(grading): sync contract with implementation (review_reason, map_risk_level, cap semantics)
 67adee6  feat(grading): implement 5-color rules, trend analysis and ticket builder
 4f5d1bf  feat(api): user endpoints, consent gates, session ownership (api@1.5)
 81a8499  feat(analysis): deterministic four-channel mock pipeline + schema/consistency
@@ -224,7 +225,6 @@ git push origin main                                                 # 远程为
 - 一致性阈值从 `app/analysis/config.py` 迁到 `app/grading/config.py` 的适配时机（grading 侧已定义权威值 0.6，analysis 仍用本地常量）；
 - 是否为 `app/analysis/` 打标签（如 `analysis-v1`）；
 - 是否为 `app/grading/` 打标签（如 `grading-v1`）；
-- 本地提交 `67adee6` 是否推送到 `origin/main`；
 - `architecture.md` 存储路径是否按 capture@1.2 修订；
 - `scripts/` 的目录归属；
 - `capture_busy` 是否在 api@1.6 增补专用错误码；
