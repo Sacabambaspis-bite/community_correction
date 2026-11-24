@@ -37,6 +37,13 @@ export function FeedbackPanel({ feedback }: { feedback: FeedbackData }) {
         </p>
       ) : null}
 
+      {/* 完成页返回入口：录音汇报与刷脸签到成功后均进入本页，统一返回事项选择（首页）。 */}
+      <div className={styles.actions}>
+        <Link className={styles.homeButton} to="/capture">
+          返回首页
+        </Link>
+      </div>
+
       <div className={styles.footer}>
         <Link to="/consent">查看或撤回知情同意</Link>
       </div>

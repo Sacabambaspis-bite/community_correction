@@ -66,6 +66,8 @@ export default function FeedbackPage() {
         <>
           <ErrorBanner message={error} onRetry={() => void loadFeedback()} />
           <p className={styles.footerHint}>
+            <Link to="/capture">返回首页</Link>
+            {" · "}
             <Link to="/consent">返回知情同意</Link>
           </p>
         </>

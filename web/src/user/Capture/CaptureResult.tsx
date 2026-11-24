@@ -118,6 +118,10 @@ export function CaptureResult({
             联系工作人员
           </button>
         ) : null}
+        {/* 失败终态同样提供返回入口，保证录音汇报 / 刷脸签到结束后可自主离开。 */}
+        <Link className={styles.secondaryButton} to="/capture">
+          返回首页
+        </Link>
       </div>
 
       {showContact ? (
