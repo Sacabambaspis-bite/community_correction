@@ -11,6 +11,19 @@
 
 > **v1.5 实现补记（2026-11-24，附加、非破坏）**：`POST /api/sessions/{id}/analyze` 正式接入分析与分级；新增 `POST /api/admin/reviews`、`GET /api/admin/reviews/{review_id}`、`GET /api/admin/tickets`、`GET /api/admin/tickets/{ticket_id}`、`POST /api/admin/tickets/{ticket_id}/transition`、`GET /api/admin/dashboard` 的字段契约；明确复盘窗口为 `YYYY-MM-DD` 自然日、0 会话窗口返回 `1005 no_session_in_window`、consent 强校验口径。契约版本号不变。
 
+> **v1.5 实现补记·二（2026-11-24，附加、非破坏）**：双模块（签到/汇报）接入——
+> 1. `POST /api/sessions` 入参新增 `kind`（`checkin`/`report`，缺省 `report`）；`checkin` 走 face_only 采集（capture@1.2 补记），`report` 行为不变；响应 `data` 与 `GET /api/sessions/{id}` 返回中增加 `kind`。
+> 2. `POST /api/sessions/{id}/analyze`：`kind=checkin` 时不得因缺音频/单模态覆写 `capture_degraded`（grading@1.2 补记·三），`no_face`/`error` 仍按既有异常处理；`kind=report` 规则不变。
+> 3. 新增 `GET /api/user/tasks`（用户端，subject 归属校验）：返回 `checkin` / `report` 两类任务的 `interval_days`、`last_completed_at`（最近 `captured` 会话的 `captured_at`，无则 null）、`overdue`（bool）。仅行为提示用途，不含色码/分值。
+> 4. 新增 `PATCH /api/admin/subjects/{id}/frequency`（管理端）：body `{checkin_interval_days?, report_interval_days?}`，整数 ≥1，至少一项；写 `audit_logs(action=frequency.update)`。
+> 5. **逾期扫描（惰性、幂等）**：`GET /api/admin/subjects`、`GET /api/admin/subjects/{id}`、`GET /api/admin/dashboard` 调用时对相关对象执行逾期判定（`now - last_completed_at > interval_days`，从未完成过对应类型采集且距 `created_at` 超过频率同样视为逾期）；逾期则生成 P0 复核工单（`suggested_method=talk_to_staff`，`detail_json` 含 `overdue_kind`、`overdue_days`），同对象同类型存在未关闭逾期工单时不重复生成；响应中对象摘要增加 `overdue: {checkin, report}` 布尔标记。逾期判定不修改 `sessions.status`、不触发分析。
+> 6. **序列化补齐（前端联调驱动）**：对象列表/详情返回 `checkin_interval_days`、`report_interval_days`；管理端会话列表项返回 `kind`；工单列表/详情返回 `detail_json`（无附加内容时为 null）。
+
+> **v1.5 实现补记·三（2026-11-24，附加、非破坏）**：思想汇报录音改为**用户手动控制**——
+> 1. `POST /api/sessions`（`kind=report`）省略 `duration_sec`（或传 null）即进入手动录音模式（capture@1.2 补记·二）；显式传值的定时模式保留兼容。
+> 2. 新增 `POST /api/sessions/{id}/stop`（用户端 + subject 归属校验）：仅手动模式且 `status=created` 时有效，置位停止事件，返回 `code=0`、`data={session_id}`；重复调用幂等返回成功；会话已 `captured`/`failed`、非手动模式或 `kind=checkin` 时返回 `1005` 状态冲突；不存在 `1004`、越权 `1003`。
+> 3. 手动模式下录音仅因用户调用 stop 而结束，服务端不设计时自动终止；录音保存、状态回写（`created → captured/failed`）、轮询与 analyze 流程不变。
+
 ---
 
 ## 1. 通用约定
@@ -142,7 +155,7 @@ Authorization: Bearer <token>
 |---|---|---|---|
 | `GET` | `/api/admin/subjects` | 已实现 | 对象列表（分页、关键词、状态） |
 | `POST` | `/api/admin/subjects` | 未实现 | 新建对象 |
-| `GET` | `/api/admin/subjects/{subject_id}` | 未实现 | 对象详情 |
+| `GET` | `/api/admin/subjects/{subject_id}` | 已实现 | 对象详情（含 `overdue` 与频率字段，惰性逾期扫描） |
 | `PATCH` | `/api/admin/subjects/{subject_id}` | 未实现 | 更新对象基础信息 |
 | `GET` | `/api/admin/sessions` | 已实现 | 会话列表（`subject_id`、`status` 过滤） |
 | `GET` | `/api/admin/sessions/{session_id}/face` | 已实现 | 查看面部图（敏感，留痕） |
@@ -232,7 +245,8 @@ curl -X PUT http://localhost:8000/api/user/consent \
 }
 ```
 
-- 入参：`subject_id`（body）、`face`（bool）、`audio`（bool）、`retention_days`（int，≥1）；
+- 入参：`subject_id`（body）、`face`（bool）、`audio`（bool）、`retention_days`（int，≥1，**可选，缺省 180**；2026-11-24 起由必填改为可选，服务端补齐默认值）；
+- `retention_days` 仅用于留存管理与审计，**用户端页面不得展示或要求填写**（ui@1.2 §3.1 补记 2）；响应中仍返回该字段；
 - `face` 与 `audio` 至少一项为 `true`，否则 `1001`；`general.granted = face or audio`；
 - 单项授权仅用于记录本人意愿，**不构成可采集状态**：发起采集前 `face` 与 `audio` 必须同时为 `true`，否则 `POST /api/sessions` 返回 `1005 consent_incomplete`（见 7.2）。该强校验口径与 ui@1.2 §3.1 一致；
 - 成功后覆写 `subjects.consent_json`，`at` 取服务端当前时间，`revoked_at` 置 `null`。
@@ -277,6 +291,7 @@ curl -X POST http://localhost:8000/api/user/consent/revoke \
 - 前端轮询 `GET /api/sessions/{id}` 获取最终状态；
 - 同一时刻仅允许一个采集任务，第二个请求返回 `code=5000`、`message=capture_busy`（专用错误码待增补）；
 - 入参 `subject_id` 必须已存在，否则 `1004`。
+- 入参 `kind`（`checkin`/`report`，缺省 `report`，见顶部补记·二）：`checkin` 为 face_only 采集；`report` 为 face+audio 双模态采集。
 
 ```bash
 curl -X POST http://localhost:8000/api/sessions \
@@ -819,3 +834,4 @@ mock 数据必须与本节示例字段完全一致，不得增删字段。
 | 1.4 | 2026-11-23 | 信封改为 `{code,message,data,degraded,request_id}`（中间件 uuid4 + `X-Request-Id` + 日志/audit）；业务码 HTTP 200、未捕获异常 HTTP 500；路由统一为 `/api/sessions` + `/api/admin/*` + `/api/user/*`；`POST /api/sessions` 改异步 + 轮询；新增 `4000`；`5000` 增加 `analysis_pipeline_not_ready` / `capture_busy` 临时语义；鉴权改为 `USER_TOKEN` / `ADMIN_TOKEN`，`APP_ENV=production` 缺配置直接启动失败 |
 | 1.5 | 2026-11-24 | 落地 `/api/user/*`（consent 查询/提交/撤回、feedback）；明确 subject 身份由客户端声明 `subject_id`（GET 走 query、写操作走 body）+ 会话归属校验（越权 `1003`）；`POST /api/sessions` 补齐 consent 三道闸（`revoked` → `general` → `face/audio`），新增 `consent_incomplete`，消除 db.md §2.1 与 api 不一致；`feedback` 在 grading 就绪前用采集状态做中性映射；60s 频控（1006）、analyze 接入、review 查询仍延期 |
 | 1.5（实现补记） | 2026-11-24 | `analyze` 正式接入分析与五色分级（`2003`、幂等、`audit_logs(session.analyze)`）；新增 reviews（POST / GET 详情）、tickets（列表 / 详情 / 流转）、dashboard 契约；复盘窗口统一 `YYYY-MM-DD`；0 可用会话 → `1005 no_session_in_window`；consent 单项授权不可采集（`consent_incomplete`）；60s 频控仍延期 |
+| 1.5（实现补记·二） | 2026-11-24 | 双模块：`POST /api/sessions` 增 `kind`；analyze 按 kind 分流；新增 `GET /api/user/tasks`、`PATCH /api/admin/subjects/{id}/frequency`；管理端读取时惰性幂等生成逾期 P0 工单；`retention_days` 可选缺省 180 |

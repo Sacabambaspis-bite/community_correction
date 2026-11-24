@@ -9,6 +9,10 @@
 
 > v1.2 已冻结，后续仅接受实现驱动的变更。
 
+> **v1.2 实现补记（2026-11-24，附加、非破坏）**：新增 **face_only 采集模式**（对应 `sessions.kind=checkin` 刷脸签到）：不启动麦克风、不产出 `audio.wav`（`audio_path=None`）；人脸成功时 `capture_status=ok` + `coverage=face_only`（属正常完成，**不是** `no_audio` 异常）；人脸失败按既有矩阵收敛为 `no_face`/`error`。目录结构、`meta.json` 必写、原始帧不落盘等红线不变；`report`（face+audio）行为完全不变。
+
+> **v1.2 实现补记·二（2026-11-24，附加、非破坏）**：`mode="both"` 新增**手动录音模式**——`run_capture_session(..., duration_sec=None, stop_event: threading.Event)`：人脸抓拍照常完成后开始录音，录音持续至 `stop_event.set()`（由 API 层 `POST /api/sessions/{id}/stop` 触发），**不存在任何自动终止/倒计时**；`meta.audio.duration_sec` 记录实际时长；`audio_too_short` 等业务判定不变（属结果反馈而非自动终止）；`stop_event` 置位前的 `audio.wav` 不落盘。显式传 `duration_sec` 的定时模式保持兼容不变；face_only 模式无音频、不涉及本补记。
+
 ---
 
 ## 1. 职责边界

@@ -241,7 +241,7 @@
     },
     "degraded": {
       "type": "boolean",
-      "description": "任一路为 degraded 或 skipped 时为 true"
+      "description": "任一路为 degraded 或 skipped 时为 true；kind=checkin 时 asr/emotion/psych 的 skipped 属预期，不计入（grading@1.2 补记·三）"
     },
     "threshold_profile": {
       "type": "string",

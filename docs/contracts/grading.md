@@ -16,6 +16,10 @@
 
 > **v1.2 实现补记·二（2026-11-24，附加、非破坏）**：backend 集成前补齐 `build_ticket` 的规则 5 语义——`manual_review=True`（低一致性）时 `priority` 覆写为 `P0`，`suggested_method` 仍按最终色；同时明确复盘生成前提（窗口内存在可用分析会话，见 §4.3）、`review_tickets.id` 与 `review_id` 的区别。`rule_version` 仍为 `grading@1.2`。
 
+> **v1.2 实现补记·三（2026-11-24，附加、非破坏）**：双模块适配——
+> 1. **`kind=checkin`（刷脸签到，face_only 为期望覆盖）**：规则 8 的「缺音频」强制条款不适用——backend 不得对 checkin 因 `no_audio`/单模态覆写 `capture_degraded`，不强制 `consistency=low`、不强制 P0/recapture；分析时 asr/emotion/psych 的 `skipped` 属**预期**（emotion 依赖音频、psych 依赖 asr），不计入 `degraded`/`needs_review`；色码仅由 face 通道合成，`map_risk_level` 以 `text_valence=0.0, intent_flag="none"` 调用。checkin 出现 `no_face`/`error` 仍属采集异常，按既有规则处理。
+> 2. **逾期复核（不走进分析管线、不改会话状态）**：超过 `checkin_interval_days` / `report_interval_days` 未完成对应类型采集时，由 backend 幂等生成 **P0** 复核工单，`suggested_method=talk_to_staff`，`detail_json` 记录 `overdue_kind`（`checkin`/`report`）与逾期天数；管理端对该对象展示红色「危机·逾期」标记（色码仅管理端）；同一对象同一类型存在未关闭（非 `closed`）逾期工单时不重复生成。
+
 ---
 
 ## 1. 模块边界

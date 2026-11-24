@@ -9,6 +9,8 @@
 
 > v1.4 已冻结，后续仅接受实现驱动的变更。
 
+> **v1.4 实现补记（2026-11-24，附加、非破坏）**：为「刷脸签到 / 录音思想汇报」双模块新增——`subjects.checkin_interval_days`（默认 1）、`subjects.report_interval_days`（默认 3）；`sessions.kind`（`checkin`/`report`，默认 `report`，存量数据即思想汇报等价语义）。签到/汇报逾期判定只读取，不改会话状态；逾期以 P0 复核工单表达（见 api.md 补记）。实现驱动追加：`review_tickets.review_id` 改为**可空**（逾期等无复盘关联的工单为 NULL，`UNIQUE(review_id)` 对 NULL 不冲突）；`review_tickets` 新增可空 JSON `detail_json`（逾期工单记录 `overdue_kind` / `overdue_days`）；`suggested_method` 新增 `talk_to_staff`；`audit_logs.action` 新增 `frequency.update`。逾期工单初始状态沿用 `pending`，不新增状态值。
+
 ---
 
 ## 1. 通用约定
@@ -36,6 +38,8 @@
 | `status` | TEXT | NOT NULL, DEFAULT `'active'`, CHECK in (`active`,`suspended`,`closed`) | |
 | `consent_json` | TEXT | NULL, JSON | 同意状态，结构见 2.1 |
 | `baseline_json` | TEXT | NULL, JSON | 个人基线，结构见 2.2 |
+| `checkin_interval_days` | INTEGER | NOT NULL, DEFAULT 1, CHECK ≥1 | 刷脸签到频率（天），管理端按对象配置 |
+| `report_interval_days` | INTEGER | NOT NULL, DEFAULT 3, CHECK ≥1 | 思想汇报频率（天），管理端按对象配置 |
 | `created_at` | TEXT | NOT NULL | |
 | `updated_at` | TEXT | NOT NULL | |
 
@@ -79,6 +83,7 @@
 |---|---|---|---|
 | `id` | TEXT | PK | UUID v4 |
 | `subject_id` | TEXT | NOT NULL, FK → `subjects.id` | |
+| `kind` | TEXT | NOT NULL, DEFAULT `'report'`, CHECK in (`checkin`,`report`) | 会话类型：`checkin` 刷脸签到（face_only）；`report` 思想汇报（face+audio） |
 | `status` | TEXT | NOT NULL, CHECK in (`created`,`captured`,`failed`) | 只反映采集结果，不随分析变化；见 3.1 |
 | `capture_status` | TEXT | CHECK in (`ok`,`partial`,`no_face`,`no_audio`,`no_face_no_audio`,`error`) | 与 [capture.md](./capture.md) 枚举一致 |
 | `face_path` | TEXT | NULL | 相对路径 |
@@ -93,6 +98,8 @@
 | `updated_at` | TEXT | NOT NULL | |
 
 > `coverage` 为派生值（由 `face_path` / `audio_path` 推导），不落列；读取时由 `CaptureSession.coverage` 属性计算。
+
+> `kind` 语义：`checkin` 的期望覆盖为 `face_only`，正常完成是 `capture_status=ok` + `coverage=face_only`，**不录音不属于异常**；`report` 的期望覆盖为 `both`，沿用既有规则。逾期判定以 `kind` + `captured_at`（`status=captured`）取最近一次完成时间。
 
 ### 3.1 `status` 状态机（仅采集）
 
@@ -177,7 +184,7 @@ pending ──分析成功且无降级──> done
 | 字段 | 类型 | 约束 | 说明 |
 |---|---|---|---|
 | `id` | TEXT | PK | UUID v4 |
-| `review_id` | TEXT | NOT NULL, FK → `reviews.id` | |
+| `review_id` | TEXT | NULL, FK → `reviews.id`, UNIQUE | 复盘来源工单指向 `reviews.id`；逾期等无复盘关联的工单为 NULL（2026-11-24 起可空） |
 | `subject_id` | TEXT | NOT NULL, FK → `subjects.id` | |
 | `status` | TEXT | NOT NULL, CHECK in (`pending`,`confirmed`,`corrected`,`closed`) | 见 5.1 |
 | `priority` | TEXT | NOT NULL, CHECK in (`P0`,`P1`,`P2`) | 见 [../grading.md](../grading.md#6-复核触发条件) |
@@ -188,6 +195,7 @@ pending ──分析成功且无降级──> done
 | `assignee` | TEXT | NULL | 处理人工号 |
 | `conclusion_color` | TEXT | NULL, CHECK in (`green`,`blue`,`yellow`,`orange`,`red`) | 人工结论色 |
 | `conclusion_note` | TEXT | NULL | 人工说明 |
+| `detail_json` | TEXT | NULL, JSON | 工单附加细节；逾期工单记录 `overdue_kind`（`checkin`/`report`）与 `overdue_days`；不含转写原文、评分明细等敏感内容 |
 | `opened_at` | TEXT | NOT NULL | |
 | `closed_at` | TEXT | NULL | |
 
@@ -221,6 +229,7 @@ pending ──confirm──> confirmed ──(自动)──> closed
 | `priority_interview` | 橙：优先安排面谈，必要时联系家属 |
 | `urgent_escalation` | 红：当日内启动危机处置流程（系统只提示，不执行） |
 | `recapture` | 采集质量问题导致的复核 |
+| `talk_to_staff` | 签到/汇报逾期未完成的危机复核（P0，2026-11-24 新增） |
 
 ## 6. `audit_logs`（访问与操作留痕）
 
@@ -247,6 +256,7 @@ pending ──confirm──> confirmed ──(自动)──> closed
 | `ticket.transition` | 工单流转 |
 | `subject.update` | 对象信息修改 |
 | `review.create` | 复盘创建 |
+| `frequency.update` | 管理端修改对象签到/汇报频率（2026-11-24 新增） |
 
 `detail_json` 示例（`sensitive.view`）：
 
@@ -261,6 +271,7 @@ pending ──confirm──> confirmed ──(自动)──> closed
 | `subjects` | `UNIQUE(code)` | 编号查询 |
 | `subjects` | `(status)` | 列表筛选 |
 | `sessions` | `(subject_id, captured_at DESC)` | 对象会话时间线 |
+| `sessions` | `(subject_id, kind, captured_at DESC)` | 按类型取最近一次签到/汇报，支撑逾期判定 |
 | `sessions` | `(status)` | 失败会话巡检 |
 | `reviews` | `(subject_id, created_at DESC)` | 对象复盘历史 |
 | `reviews` | `(final_color)` | 看板色码分布 |
@@ -277,6 +288,7 @@ pending ──confirm──> confirmed ──(自动)──> closed
 {
   "id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
   "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
+  "kind": "report",
   "status": "captured",
   "capture_status": "ok",
   "face_path": "subjects/3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c/sessions/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f/face.jpg",
