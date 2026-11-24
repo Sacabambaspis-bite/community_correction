@@ -1,6 +1,6 @@
 # 项目进度（PROGRESS）
 
-> 生成时间：2026-11-24 · 基准提交：`5eef4bb`（`main` 与 `origin/main` 同步）+ 未提交变更（SenseVoice ASR 接入、consent 一次性授权、签到/思想汇报双模块与逾期复核、思想汇报手动录音）· 依据：`git log`、`git tag`、`pytest` 实测、[QA 报告](./reports/qa-2026-11-24.md)。
+> 生成时间：2026-11-24 · 基准提交：`4c38d5d`（`main` 与 `origin/main` 同步，另含未提交的 P11 用户端入口调整）· 依据：`git log`、`git tag`、`pytest` 实测、[QA 报告](./reports/qa-2026-11-24.md)。
 > 本文只记录仓库里可核实的事实；尚未实现或未定稿的内容标注「待确认」。
 
 ## 1. 项目定位与技术栈
@@ -37,9 +37,21 @@
 | P7 用户端 API | 11-24 08:31 | `/api/user/*`、consent 三闸、会话归属校验（api@1.5） | `app/api/routers/user.py` | `4f5d1bf` |
 | P8 分级与前端骨架 | 11-24 13:24–13:34 | 五色规则、七日趋势、合成封顶、工单草案；前端用户端 3 页 + 管理端 4 页（mock） | `app/grading/`、`tests/test_grading/`、`web/` | `67adee6`、`601d33d`、`337fdb9`、`7782e65` |
 | P9 分析→分级打通 | 11-24 14:18 | `analyze` 正式接入、复盘/工单/看板端点、低一致性强制 P0、契约同步 | `app/api/integration.py`、相关路由 | `1d3fb0e`、`c46536e`、`5eef4bb` |
-| P10 工作区增量（未提交） | 11-24 之后 | ① SenseVoice ASR 真实接入（超时回退）② consent 一次性授权、去保存期限 ③ 签到/汇报双模块 + 逾期复核 ④ 思想汇报手动录音 | 见 §3 末段 | 工作区 |
+| P10 双模块与手动录音 | 11-24 15:05–15:20 | ① SenseVoice ASR 真实接入（超时回退）② consent 一次性授权、去保存期限 ③ 签到/汇报双模块 + 逾期复核 ④ 思想汇报手动录音 | 见 §3 下表 | `fa5a0d7`、`8013d4e` |
+| P11 用户端入口调整 | 2026-11-24 16:05 | 同意后直达采集页；事项页新增「AI援助」「教育学习」入口与「功能待开发」占位页；文档同步 | `web/src/user/`、`docs/contracts/ui.md`、`README.md` | 见 §2.1 |
 
-**阶段结论**：P0–P9 已形成「采集 → 数据 → 分析 → 分级 → 工单 → 前端骨架」的完整纵向切片并全部提交；P10 为当前未提交增量，测试总数由 224 增至 273。
+**阶段结论**：P0–P10 已形成「采集 → 数据 → 分析 → 分级 → 工单 → 前端」的完整纵向切片并全部提交；P11 为当前待提交增量，测试总数由 224 增至 273（本轮仅前端，不影响 pytest）。P10 的「未提交」状态已由 `fa5a0d7`、`8013d4e`、`4c38d5d` 收敛。
+
+### 2.1 进度记录：P11 用户端入口与跳转调整
+
+| 项 | 内容 |
+|---|---|
+| 完成时间 | 2026-11-24 16:05（Asia/Shanghai） |
+| 变更内容 | ① 移除同意后的中间引导步骤：`PUT /api/user/consent` 成功后直接 `replace` 跳转 `/capture`，删除「进入采集引导」按钮与成功提示框<br>② `/capture` 新增「更多服务」分区，加入 **AI援助**、**教育学习** 两个入口卡片（复用事项卡片样式与响应式栅格，不依赖任务接口）<br>③ 新建 `/pending?feature=ai-aid\|education`「功能待开发」占位页，白名单校验参数并提供返回入口<br>④ 代码注释标注 AI援助 后续可扩展心理援助 / 法律援助 / 就业帮扶<br>⑤ 同步 `ui@1.2` 补记 5、README 功能说明与已知限制 |
+| 完成状态 | 已完成（前端）；`npm run build` 通过；浏览器实测：同意提交直达 `/capture`、四卡片展示、两个入口跳转与占位页文案均符合预期 |
+| 影响范围 | 仅 `web/src/user/`（Consent、Capture、ComingSoon）与 `web/src/App.tsx`；未改动签到 / 汇报 / 分析 / 分级 / 后端逻辑，pytest 仍为 273 passed |
+| 后续待办 | ① 为 AI援助 / 教育学习设计并实现后端接口与数据表后再开放入口<br>② 需要时把 AI援助 拆分为心理援助 / 法律援助 / 就业帮扶三个独立入口与页面<br>③ 补充前端路由级测试（当前依赖构建与人工浏览器验证）<br>④ 管理端如需可见入口配置，需新增配置项（当前无） |
+| 备注 | 两个新增入口**暂无后端支持**，仅为占位；`feature` 非法取值只显示中性文案，不泄露内部标识 |
 
 ## 3. 已完成功能模块与交付物
 
@@ -57,19 +69,21 @@
 | 契约文档 api@1.5（用户端 / consent / 会话归属） | 已冻结 | `4f5d1bf` |
 | `app/api/` 用户端端点、consent 三闸、会话归属校验 | 已实现 | `4f5d1bf` |
 | `app/analysis/` 四路 mock、Schema 校验、一致性判定 | 已实现（未打标签） | `81a8499` |
-| `tests/test_analysis/`（64 条） | 全绿 | `81a8499` + 工作区（SenseVoice） |
-| SenseVoice ASR Provider（真实 API + 10s 超时 + Mock 回退） | 已实现（未提交） | 工作区 |
+| `tests/test_analysis/`（69 条） | 全绿 | `81a8499`、`fa5a0d7` |
+| SenseVoice ASR Provider（真实 API + 10s 超时 + Mock 回退） | 已实现 | `fa5a0d7` |
 | `app/grading/` 五色规则、七日趋势偏移、合成封顶、工单草案 | 已实现并接入 API（未打标签） | `67adee6`、`1d3fb0e` |
 | `tests/test_grading/`（108 条） | 全绿 | `67adee6`、`1d3fb0e` |
 | `web/` 用户端 3 页 + 管理端 4 页骨架（mock 联调） | 已实现 | `601d33d` |
-| consent 一次性授权改版（去保存期限、`retention_days` 可选缺省 180） | 已实现（未提交） | 工作区 |
-| 双模块：用户端 `/capture` 选择页 + `/capture/checkin`（face_only）+ `/capture/report` | 已实现（未提交） | 工作区 |
-| 双模块后端：`sessions.kind`、频率字段、`GET /api/user/tasks`、`PATCH .../frequency`、逾期 P0 工单（惰性幂等） | 已实现（未提交） | 工作区 |
-| 管理端：频率编辑、最近签到/汇报时间、红色「危机·逾期」徽标、逾期工单中文展示 | 已实现（未提交） | 工作区 |
-| 思想汇报手动录音：`stop_event` 采集模式 + `POST /api/sessions/{id}/stop` + 前端正计时无自动终止 | 已实现（未提交） | 工作区 |
+| consent 一次性授权改版（去保存期限、`retention_days` 可选缺省 180） | 已实现 | `fa5a0d7`、`8013d4e` |
+| 双模块：用户端 `/capture` 选择页 + `/capture/checkin`（face_only）+ `/capture/report` | 已实现 | `fa5a0d7`、`8013d4e` |
+| 双模块后端：`sessions.kind`、频率字段、`GET /api/user/tasks`、`PATCH .../frequency`、逾期 P0 工单（惰性幂等） | 已实现 | `fa5a0d7` |
+| 管理端：频率编辑、最近签到/汇报时间、红色「危机·逾期」徽标、逾期工单中文展示 | 已实现 | `8013d4e` |
+| 思想汇报手动录音：`stop_event` 采集模式 + `POST /api/sessions/{id}/stop` + 前端正计时无自动终止 | 已实现 | `fa5a0d7`、`8013d4e` |
 | analyze 正式接入 + 复盘 / 工单 / 看板端点 | 已实现 | `c46536e` |
 | `map_risk_level` wiring + 低一致性 P0 修复 | 已实现 | `c46536e`、`1d3fb0e` |
-| 远程仓库 | `main` 与 `origin/main` 同步 | `origin/main` @ `5eef4bb` |
+| 用户端同意提交后直达 `/capture`，移除中间引导步骤 | 已实现（未提交，P11） | 工作区 |
+| `/capture` 新增「AI援助」「教育学习」入口 + `/pending` 功能待开发占位页（**暂无后端支持**） | 已实现（未提交，P11） | 工作区 |
+| 远程仓库 | `main` 与 `origin/main` 同步 | `origin/main` @ `4c38d5d` |
 | `scripts/seed_demo.py` 演示数据（含占位素材） | 已实现 | `0bb78b5` |
 | QA 核验 + M1–M4/L4/L8 修复 | 已完成 | `638245e`（报告）、`7732930`（修复） |
 
@@ -183,16 +197,18 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 
 | 目录 | 内容 | 状态 |
 |---|---|---|
-| `app/analysis/` | 四路 mock、Schema 校验、一致性判定 | 已实现；ASR 已接 SenseVoice（工作区未提交），emotion/face/psych 真模型待接；`risk_level` 已 wiring `map_risk_level`（`c46536e`） |
+| `app/analysis/` | 四路 mock、Schema 校验、一致性判定 | 已实现；ASR 已接 SenseVoice（`fa5a0d7`），emotion/face/psych 真模型待接；`risk_level` 已 wiring `map_risk_level`（`c46536e`） |
 | `app/grading/` | 五色规则、七日趋势偏移、合成封顶、工单草案 | 已实现并接入 API（`c46536e`）；低一致性 P0 已补 |
 | `app/api/` | analyze / reviews / tickets / dashboard | 已接入（`c46536e`）；余项见下 |
-| `web/` | 用户端 3 页 + 管理端 4 页 | 骨架已实现（`601d33d`），待与真实 API 联调 |
+| `web/` | 用户端页面 + 管理端 4 页 | 骨架已实现（`601d33d`），双模块与手动录音已落地（`8013d4e`）；P11 新增「AI援助」「教育学习」占位入口（未提交）；待与真实 API 联调 |
+| `web/` · 新增入口后端 | AI援助 / 教育学习 | **未开始**：无接口、无表、无业务逻辑，仅前端占位 |
 
 **API 剩余延期项**
 
 - 复盘列表 `GET /api/admin/reviews`；
 - `GET /api/admin/sessions/{id}/transcript`（管理端敏感面板）；
-- （`GET /api/admin/subjects/{subject_id}` 已随双模块实现，工作区）
+- （`GET /api/admin/subjects/{subject_id}` 已随双模块实现，`fa5a0d7`）
+- `AI援助` / `教育学习` 的接口与数据表（P11 仅前端占位，后端未排期）
 - 60 秒重复建会话频控（`1006`）；
 - `capture_busy` 专用业务码（当前复用 `code=5000`）。
 
