@@ -1,0 +1,21 @@
+{
+  "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
+  "color_distribution": {
+    "green": 3,
+    "blue": 2,
+    "yellow": 0,
+    "orange": 0,
+    "red": 0
+  },
+  "trend_7d": [
+    { "date": "2026-11-17", "color": "green" },
+    { "date": "2026-11-18", "color": "green" },
+    { "date": "2026-11-19", "color": "green" },
+    { "date": "2026-11-20", "color": "blue" },
+    { "date": "2026-11-21", "color": "blue" },
+    { "date": "2026-11-22", "color": "blue" },
+    { "date": "2026-11-23", "color": "blue" }
+  ],
+  "pending_tickets": 1,
+  "last_session_at": "2026-11-23T10:12:36+08:00"
+}

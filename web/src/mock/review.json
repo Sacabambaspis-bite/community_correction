@@ -1,0 +1,29 @@
+{
+  "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b1c",
+  "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
+  "window_start": "2026-11-17T00:00:00+08:00",
+  "window_end": "2026-11-23T23:59:59+08:00",
+  "window_days": 7,
+  "single_session_risk": "none",
+  "trend_color": "blue",
+  "final_color": "blue",
+  "consistency": "medium",
+  "manual_review": false,
+  "rules_fired": ["R_TREND_BLUE"],
+  "grading_version": "grading@1.1",
+  "evidence": [
+    {
+      "rule_id": "R_TREND_BLUE",
+      "rule_version": "grading@1.1",
+      "field_path": "psych.output.signal_strength",
+      "observed_value": 41.2,
+      "threshold_key": "TREND_BLUE_OFFSET_MIN",
+      "threshold_value": 0.8,
+      "offset_score": 1.02,
+      "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
+      "window": ["2026-11-17", "2026-11-23"],
+      "triggered_at": "2026-11-23T10:13:00+08:00"
+    }
+  ],
+  "created_at": "2026-11-23T10:13:00+08:00"
+}

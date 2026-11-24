@@ -1,0 +1,50 @@
+.wrap {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--badge-color);
+  border-radius: 999px;
+  color: var(--badge-color);
+  background: var(--color-surface);
+  font-weight: 600;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--badge-color);
+}
+
+.missing {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+  background: var(--color-danger-weak);
+}
+
+.rules {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.link {
+  font-size: 12px;
+}
+
+.linkMissing {
+  color: var(--color-danger);
+  font-size: 12px;
+}
+
+.at {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}

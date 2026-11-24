@@ -1,0 +1,29 @@
+/* 色值唯一来源：ui@1.2 §5.1 规定色值只在此文件定义一次，组件只引用变量。 */
+:root {
+  --c-green: #2f9e44;
+  --c-blue: #1c7ed6;
+  --c-yellow: #d9a406;
+  --c-orange: #e8590c;
+  --c-red: #d6336c;
+
+  --color-bg: #f5f7fa;
+  --color-surface: #ffffff;
+  --color-text: #1f2933;
+  --color-text-muted: #616e7c;
+  --color-border: #d9e2ec;
+  --color-primary: #2b6cb0;
+  --color-primary-weak: #ebf4ff;
+  --color-on-primary: #ffffff;
+  --color-danger: #c92a2a;
+  --color-danger-weak: #fff5f5;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --font-sans: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+}

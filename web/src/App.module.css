@@ -1,0 +1,58 @@
+.entry {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+}
+
+.entryCard {
+  width: 100%;
+  max-width: 560px;
+  padding: var(--space-6);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.entryTitle {
+  font-size: 22px;
+}
+
+.entryNote {
+  margin-top: var(--space-2);
+  color: var(--color-text-muted);
+}
+
+.entryLinks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-5) 0;
+}
+
+.linkCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+}
+
+.linkCard:hover {
+  border-color: var(--color-primary);
+  background: var(--color-primary-weak);
+  text-decoration: none;
+}
+
+.linkCard span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.entryHint {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
