@@ -14,6 +14,8 @@
 
 > **v1.2 实现补记（2026-11-24，附加、非破坏）**：随 `app/grading/` 落地（提交 `67adee6`）登记实现驱动新增项——`RuleHit` 可选字段 `offset_score` / `insufficient`、`FinalGrading.review_reason`、`map_risk_level` 与相关配置键、工单 `priority` / `suggested_method` 覆写规则、`build_ticket` 的 `now` 时区校验。规则编号与 `rule_version` 均保持 `grading@1.2` 不变。
 
+> **v1.2 实现补记·二（2026-11-24，附加、非破坏）**：backend 集成前补齐 `build_ticket` 的规则 5 语义——`manual_review=True`（低一致性）时 `priority` 覆写为 `P0`，`suggested_method` 仍按最终色；同时明确复盘生成前提（窗口内存在可用分析会话，见 §4.3）、`review_tickets.id` 与 `review_id` 的区别。`rule_version` 仍为 `grading@1.2`。
+
 ---
 
 ## 1. 模块边界
@@ -163,7 +165,12 @@ def build_ticket(final: FinalGrading, review_id: str, subject_id: str, now: str)
     """生成工单草案，字段与 db.md 的 review_tickets 对齐（不含 `review_reason`，db 无该列）。
     仅当 final_color == "green" 且 needs_review == false 时抛 ValueError；
     「绿 + 降级」(R_DEGRADED_REVIEW) 与 `review_reason == "capture_degraded"` 属于允许建单的组合。
-    `now` 必须为带时区 ISO 时间，否则抛 ValueError("now_must_be_timezone_aware")。"""
+    `manual_review == true`（低一致性，规则 5）时 `priority` 覆写为 `P0`，`suggested_method`
+    仍按最终色（契约 §6）。
+    `now` 必须为带时区 ISO 时间，否则抛 ValueError("now_must_be_timezone_aware")。
+
+    输出不含工单主键 `id`：`review_tickets.id` 由调用方（API 层）生成，`review_id` 指向
+    `reviews.id`。"""
 
 
 def map_risk_level(text_valence: float, intent_flag: str = "none") -> str:
@@ -200,7 +207,10 @@ evaluate_session → evaluate_period → compose → build_ticket
 | 其余 | `routine_check` |
 
 - 调用方（backend）在已知 `capture_status in (partial, no_face, no_audio)` 时，须用 `dataclasses.replace(final, review_reason="capture_degraded")` 覆写后再 `build_ticket`；
-- `build_ticket` 见 `review_reason == "capture_degraded"` 时，`priority` 覆写为 `P0`、`suggested_method` 覆写为 `recapture`，且不受「绿 + 不复核」拒单守卫拦截。
+- `build_ticket` 见 `review_reason == "capture_degraded"` 时，`priority` 覆写为 `P0`、`suggested_method` 覆写为 `recapture`，且不受「绿 + 不复核」拒单守卫拦截；
+- 低一致性（`consistency == "low"`）时 `compose` 默认 `review_reason="consistency_conflict"`，但该值**不直接改变** `priority`；规则 5 的 `P0` 由 `FinalGrading.manual_review == true` 驱动（`build_ticket` 覆写 `priority`，`suggested_method` 仍按最终色）；
+- **复盘生成前提**：窗口内存在「可用分析会话」——`sessions.status == "captured"` 且 `analysis_status in ("done", "degraded")`。0 条时不落 `reviews`、不建工单，复盘接口返回 `1005 no_session_in_window`（趋势偏移样本仍只统计 `psych.status == "ok"`，两者不是同一口径，见 [../grading.md §4.3](../grading.md)）；
+- **主键归属**：`build_ticket` 输出不含 `id`；`review_tickets.id` 由 API 层生成，输出中的 `review_id` 指向 `reviews.id`。
 
 ## 5. `config.py` 配置键
 
@@ -304,9 +314,18 @@ SUGGESTED_METHOD: dict[str, str] = {
 | 最终色 / 条件 | priority | suggested_method |
 |---|---|---|
 | `review_reason == "capture_degraded"`（规则 8，覆写） | `P0` | `recapture` |
-| `red` / `orange` / 低一致性 | `P0` | 按最终色 |
+| `red` / `orange` / 低一致性（`manual_review=true`） | `P0` | 按最终色 |
 | `yellow` / 分析降级补采（绿 + `degraded`） | `P1` | 按最终色 / `recapture` |
 | `blue` | `P2` | `routine_checkin` |
+
+覆写顺序固定，不可调换：
+
+```
+capture_degraded → P0/recapture
+绿 + needs_review → P1/recapture
+manual_review=true（低一致性）→ P0，方法按最终色
+其余 → 按最终色映射
+```
 
 `due_at = now + DEADLINE_HOURS[priority]`，保持时区、输出毫秒精度 ISO；相同输入必须输出一致（幂等，不含随机值）。
 
@@ -331,6 +350,8 @@ SUGGESTED_METHOD: dict[str, str] = {
 | 复核标记 | `compose` | `low` 必 `manual_review=True`；`degraded` 必 `needs_review=True` |
 | 采集降级 | 规则 8 | `capture_status in (partial,no_face,no_audio)` → `consistency=low`、`review_reason=capture_degraded`、必建 `P0` 单；封顶对 `red` 豁免（`red` 保持） |
 | 工单覆写 | `build_ticket` | `review_reason=capture_degraded` → `P0`+`recapture`；即便最终绿也不抛 `ticket_not_allowed_for_green` |
+| 低一致性 P0 | 规则 5 | `manual_review=true` 时蓝/黄也出 `P0`，`suggested_method` 保持 `routine_checkin` / `focused_interview` |
+| 复盘前提 | 调用方 | 窗口内 0 条可用分析会话（`captured` + `analysis_status∈{done,degraded}`）不落 `reviews`，接口返回 `1005 no_session_in_window` |
 | risk_level 映射 | `map_risk_level` | 五档断点；`text_valence` 正常但 `intent_flag=suicide_intent` → `crisis` |
 | 绿 + 降级 | `R_DEGRADED_REVIEW` | 最终绿且 `degraded=True` 时仍建单，`priority=P1` |
 | 建单 | `build_ticket` | 绿且 `needs_review=False` 抛异常；「绿 + 降级」不抛；非绿字段齐全；`due_at` 按 P 级计算 |

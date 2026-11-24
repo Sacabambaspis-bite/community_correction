@@ -104,13 +104,15 @@ offset_score = (window_signal_mean - baseline.psych_signal_mean)
 
 `R_BASELINE_INSUFFICIENT` 判蓝而非绿，是因为"无法判断"不等于"正常"；但也不升级为黄，避免误报。
 
-### 4.3 窗口无数据
+### 4.3 窗口无数据与「可用会话」
 
-窗口内没有任何 `psych.status=ok` 的会话：
+复盘生成的前提是窗口内存在**可用分析会话**：`sessions.status = captured` 且 `analysis_status in (done, degraded)`。
 
-- 不生成 `reviews` 记录；
-- `POST /api/reviews` 返回 `code=1005`、`message=no_session_in_window`；
-- 不建工单。
+- 窗口内 0 条可用会话：不生成 `reviews` 记录、不建工单，复盘接口返回 `code=1005`、`message=no_session_in_window`；
+- 趋势偏移的样本仍只统计 `psych.status = ok` 的会话（见 4.1）。因此"有可用会话但无 psych 样本"（如 `no_audio` 导致 psych skipped）时，复盘的 `trend_color` 走 `R_BASELINE_INSUFFICIENT` 判蓝，但 `reviews` 记录仍然生成；
+- 规则 8 的会话（`partial` / `no_face` / `no_audio`）即使没有 psych 样本，也必须生成复核工单（`P0` + `recapture`）。
+
+> 「可用会话」与「趋势可用样本」不是同一口径：前者决定是否生成复盘，后者只决定偏移分如何计算。
 
 ## 5. 合成规则
 
@@ -262,6 +264,7 @@ step4  if degraded == true:      needs_review = true，并计入 R_DEGRADED_REVI
 | `grading@1.1` | 2026-11-23 | 规则 8 收敛：partial 与单模态强制 `consistency=low`、颜色上限 `orange`、必须建单；无产物会话不建单 |
 | `grading@1.2` | 2026-11-23 | 规则 8 的 `P0` 恢复“同规则 5”引用；v1.2 冻结 |
 | `grading@1.2`（实现补记） | 2026-11-24 | 实现驱动澄清：5.2 低一致性精确语义（`green→orange`、`red` 豁免、蓝/黄/橙保持）、规则 8 的 `red` 不封顶与 `recapture`/`P0` 建单、登记 analysis 侧 `risk_level` 映射；`rule_version` 仍 `grading@1.2`，属附加非破坏变更 |
+| `grading@1.2`（实现补记·二） | 2026-11-24 | 规则 5 的 `P0` 明确由 `manual_review` 驱动（`build_ticket` 覆写 `priority`）；4.3 明确「可用会话」定义及其与趋势样本、规则 8 的关系；`rule_version` 不变 |
 
 变更要求：
 

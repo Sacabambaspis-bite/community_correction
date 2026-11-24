@@ -167,7 +167,10 @@ pending ──分析成功且无降级──> done
 - `trend_color` 的枚举不含 `orange` / `red`：趋势规则本身只产出绿/蓝/黄，橙与红只来自单次规则或合成封顶；
 - `single_session_risk=none` 表示单次规则未命中；
 - `final_color != green` 必须存在对应 `review_tickets` 记录（由 `api` 层在同一事务保证）；
-- 同一对象的同一 `window_end` 只允许一条复盘记录（`UNIQUE(subject_id, window_end)`），防止同一窗口重复生成。
+- 同一对象的同一 `window_end` 只允许一条复盘记录（`UNIQUE(subject_id, window_end)`），防止同一窗口重复生成；
+- `window_start` / `window_end` 为 `YYYY-MM-DD` 自然日（含端点），与 grading 证据的 `window` 数组一致；
+- 窗口内 0 条**可用分析会话**（`sessions.status = captured` 且 `analysis_status in (done, degraded)`）时不落 `reviews`，复盘接口返回 `1005 no_session_in_window`；
+- 有可用会话但无 `psych.status = ok` 样本时（如 `no_audio`）仍可落 `reviews`，趋势走 `R_BASELINE_INSUFFICIENT` 判蓝（见 [../grading.md §4.3](../grading.md)）。
 
 ## 5. `review_tickets`（复核工单）
 
@@ -187,6 +190,8 @@ pending ──分析成功且无降级──> done
 | `conclusion_note` | TEXT | NULL | 人工说明 |
 | `opened_at` | TEXT | NOT NULL | |
 | `closed_at` | TEXT | NULL | |
+
+> `id` 为工单主键（UUID v4，由 API 层生成）；`review_id` 指向 `reviews.id`。`grading.build_ticket` 的输出只提供后者，不含 `id`。
 
 ### 5.1 工单状态机
 

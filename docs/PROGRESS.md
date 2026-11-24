@@ -1,6 +1,6 @@
 # 项目进度（PROGRESS）
 
-> 生成时间：2026-11-24 · 基准提交：`337fdb9`（`main` 与 `origin/main` 同步）· 依据：`git log`、`git tag`、`pytest` 实测、[QA 报告](./reports/qa-2026-11-24.md)。
+> 生成时间：2026-11-24 · 基准提交：`7782e65`（`main` 领先 `origin/main` 1 个提交）+ 本轮未提交变更 · 依据：`git log`、`git tag`、`pytest` 实测、[QA 报告](./reports/qa-2026-11-24.md)。
 > 本文只记录仓库里可核实的事实；尚未实现或未定稿的内容标注「待确认」。
 
 ## 1. 项目定位与技术栈
@@ -11,13 +11,13 @@
 |---|---|---|
 | 运行时 | Python 3.11 | 已用（本机 3.11.0rc2） |
 | 采集 | OpenCV / MediaPipe / sounddevice | 已实现并硬件验证，封存于 `capture-v1` |
-| Web 框架 | FastAPI 0.165.0 + uvicorn 0.54.0 | 骨架 + 用户端 / consent 已实现（`api-v1` → `api@1.5`） |
+| Web 框架 | FastAPI 0.165.0 + uvicorn 0.54.0 | 骨架 + 用户端 / consent / analyze 接入（`api-v1` → `api@1.5` 实现补记） |
 | ORM / 数据库 | SQLAlchemy 2.x（原型阶段手工迁移）/ SQLite | 5 张表已实现（`db-v1`）；本机实际 2.1.9，`requirements` 已锁 `<2.1` |
-| 分析 | Provider 抽象 + 确定性 mock | 四路 mock 已实现（`app/analysis/`），真模型未接 |
-| 分级 | 五色纯函数规则 + 七日趋势 + 工单草案 | 已实现（`app/grading/`），尚未接入 API |
+| 分析 | Provider 抽象 + 确定性 mock | 四路 mock 已实现；`overall.risk_level` 已接 `app.grading.config.map_risk_level`（本轮），真模型未接 |
+| 分级 | 五色纯函数规则 + 七日趋势 + 工单草案 | 已实现并接入 analyze / 复盘 / 工单接口（本轮） |
 | Schema 校验 | jsonschema（Draft 2020-12 + FormatChecker） | 已引入，分析结果强制校验 |
-| 前端 | React + Vite（用户端 / 管理端同仓，按路由分区） | 未实现 |
-| 测试 | pytest | 212 条全绿（capture 6 / db 13 / api 32 / analysis 55 / grading 106） |
+| 前端 | React + Vite（用户端 / 管理端同仓，按路由分区） | 用户端 3 页 + 管理端 4 页骨架已实现（`601d33d`），联调仍走 mock |
+| 测试 | pytest | 224 条全绿（capture 6 / db 13 / api 42 / analysis 55 / grading 108） |
 
 技术栈来源：[architecture.md](./architecture.md#L11-L21)；采集运行在后端宿主设备而非浏览器（[architecture.md](./architecture.md#L23-L31)）。
 
@@ -38,9 +38,12 @@
 | `app/api/` 用户端端点、consent 三闸、会话归属校验 | 已实现 | `4f5d1bf` |
 | `app/analysis/` 四路 mock、Schema 校验、一致性判定 | 已实现（未打标签） | `81a8499` |
 | `tests/test_analysis/`（55 条） | 全绿 | `81a8499` |
-| `app/grading/` 五色规则、七日趋势偏移、合成封顶、工单草案 | 已实现（未接入 API、未打标签） | `67adee6` |
-| `tests/test_grading/`（106 条） | 全绿 | `67adee6` |
-| 远程仓库 | 已推送，`main` 与 `origin/main` 同步 | `origin/main` @ `337fdb9` |
+| `app/grading/` 五色规则、七日趋势偏移、合成封顶、工单草案 | 已实现并接入 API（本轮；未打标签） | `67adee6` + 本轮 |
+| `tests/test_grading/`（108 条） | 全绿 | `67adee6` + 本轮 |
+| `web/` 用户端 3 页 + 管理端 4 页骨架（mock 联调） | 已实现 | `601d33d` |
+| analyze 正式接入 + 复盘 / 工单 / 看板端点 | 已实现（本轮未提交） | 工作区 |
+| `map_risk_level` wiring + 低一致性 P0 修复 | 已实现（本轮未提交） | 工作区 |
+| 远程仓库 | `main` 领先 `origin/main` 1 个提交 | `origin/main` @ `337fdb9` |
 | `scripts/seed_demo.py` 演示数据（含占位素材） | 已实现 | `0bb78b5` |
 | QA 核验 + M1–M4/L4/L8 修复 | 已完成 | `638245e`（报告）、`7732930`（修复） |
 
@@ -65,7 +68,7 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 787ee0e  feat(capture): align to contract state machine (coverage/warnings/optional crop) + tests
 ```
 
-**尚未实现**：`web/`。`app/api/` 的 analyze 与 review 接入仍延期（`app/grading/` 已就绪待接入）。`app/capture/` 已封存，`app/db/`、`app/api/` 骨架、`app/analysis/` mock 与 `app/grading/` 分级规则已实现。
+**尚未实现**：复盘列表 `GET /api/admin/reviews`、60 秒频控（`1006`）、转写查看、`GET /api/admin/subjects/{id}`。`web/` 骨架已实现（`601d33d`）；`app/api/` 的 analyze / review / tickets / dashboard 已接入（本轮）；`app/capture/` 已封存，`app/db/`、`app/api/`、`app/analysis/` mock 与 `app/grading/` 分级规则均已实现。
 
 采集模块已落地的契约要点：
 
@@ -84,7 +87,8 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 - 已实现：`GET /api/health`、`POST/GET /api/sessions`、`GET /api/admin/subjects|sessions`、`GET /api/admin/sessions/{id}/face`（写 `audit_logs`）；
 - 已实现用户端：`GET/PUT /api/user/consent`、`POST /api/user/consent/revoke`、`GET /api/user/sessions/{id}/feedback`；`POST /api/sessions` 前置 consent 三闸（`consent_revoked` → `consent_required` → `consent_incomplete`）；
 - 会话归属校验：`subject` 调用 `GET /api/sessions/{id}` 与 feedback 时必须带 `subject_id`，缺失 `1001`、不匹配 `1003`；
-- `POST /api/sessions/{id}/analyze` 仍为占位 `5000 analysis_pipeline_not_ready`；分析未接入前，`GET /api/sessions/{id}` 已按 `captured→2001`、`analysis failed→2003` 的优先级映射。
+- `POST /api/sessions/{id}/analyze` 已正式接入（本轮）：`captured` 跑四路分析并落 `analysis_json` / `transcript_path` / `analysis_status`，再按自然日窗口生成 `reviews` / `review_tickets`；分析彻底失败 `2003` 且不改 `sessions.status`；重复调用幂等；
+- 新增管理端端点（本轮）：`POST /api/admin/reviews`（0 可用会话 → `1005 no_session_in_window`）、`GET /api/admin/reviews/{id}`、`GET /api/admin/tickets`、`GET /api/admin/tickets/{id}`（写 `sensitive.view`）、`POST /api/admin/tickets/{id}/transition`、`GET /api/admin/dashboard`（`subject_id` 可选，缺省取最近采集对象）。
 
 分析模块（`app/analysis/`，全部 mock）已落地的要点：
 
@@ -101,8 +105,8 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 - 单次规则：`R_SINGLE_RED`（`intent_flag=suicide_intent` 直接红；`self_harm_mention` 且 `signal_strength>=80` 红，红不受一致性封顶）、`R_SINGLE_ORANGE`（`signal>=70` 且非自杀意图，附 emotion/face 辅助佐证证据）；
 - 趋势规则：`offset_score=(window_mean - baseline_mean)/max(std, BASELINE_MIN_STD)`，`R_TREND_YELLOW/BLUE/GREEN` 边界 `1.5/0.8`，基线或窗口不足走 `R_BASELINE_INSUFFICIENT` 判蓝并在证据标 `insufficient`、`offset_score` 置 0；窗口按自然日可跨月；
 - 合成：取大 → `R_CONSISTENCY_CAP`（low 封顶橙，红豁免；**绿+low 抬至橙**强制复核）→ `manual_review` → `R_DEGRADED_REVIEW` 标 `needs_review`（不改色）；
-- 工单草案：`build_ticket` 只返回 dict（无 DB/通知/处置动作）；绿且不复核抛 `ticket_not_allowed_for_green`；色码→`priority`/`suggested_method`，`due_at` 按 P0/P1/P2 加 24/72/168h，幂等；
-- 历史遗留 `risk_level` 映射：`config.map_risk_level(text_valence, intent_flag)` 先按 `text_valence` 分段（`[-0.8,-0.5,-0.2,0.0]`→crisis/high/elevated/watch/none），`intent_flag∈{suicide_intent,self_harm_mention}` 强制覆写 `crisis`；**尚未 wiring 进 `app/analysis/pipeline.py`**；
+- 工单草案：`build_ticket` 只返回 dict（无 DB/通知/处置动作）；绿且不复核抛 `ticket_not_allowed_for_green`；色码→`priority`/`suggested_method`，`due_at` 按 P0/P1/P2 加 24/72/168h，幂等；`manual_review=true`（低一致性）覆写 `priority=P0`、方法按最终色；`capture_degraded` 覆写 P0 + `recapture`；
+- 历史遗留 `risk_level` 映射：`config.map_risk_level(text_valence, intent_flag)` 先按 `text_valence` 分段（`[-0.8,-0.5,-0.2,0.0]`→crisis/high/elevated/watch/none），`intent_flag∈{suicide_intent,self_harm_mention}` 强制覆写 `crisis`；**已 wiring 进 `app/analysis/pipeline.py`**（本轮，`pending` 占位已删除）；
 - 阈值唯一来源 `config.py`（15 项均标 `# TODO: 待标定`），`tests/test_grading/test_config.py` 源码扫描保证规则模块无字面量泄漏。
 
 ## 3. 关键决策与理由
@@ -126,10 +130,14 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 | **SQLAlchemy 临时锁 `<2.1`** | [requirements.txt](../requirements.txt)、[migrations/README](../app/db/migrations/README.md) | 2.1.x 开启外键时多表同事务 flush 顺序错误（QA M1）；seed 的逐表 flush 作为双保险 |
 | **分析全走 mock Provider** | [prd.md](./prd.md#L33) | 本轮先跑通链路与契约，不引入模型不确定性 |
 | **分析运行状态与结果分离** | [models.py](../app/analysis/models.py)、[pipeline.py](../app/analysis/pipeline.py) | `AnalysisResult` 严格对齐 schema；`done/degraded/failed` 放在独立包装层，失败不产出可进入 grading 的结果 |
-| **`risk_level` 映射落在 grading config** | [config.py](../app/grading/config.py) `map_risk_level` | 历史遗留：按 `text_valence` 分段 + 明确意图覆写 `crisis`；全部 `# TODO: 待标定`。`app/analysis` 占位 `pending` 待 backend 接入时替换 |
+| **`risk_level` 映射落在 grading config 并已 wiring** | [config.py](../app/grading/config.py) `map_risk_level`、[pipeline.py](../app/analysis/pipeline.py) | 按 `text_valence` 分段 + 明确意图覆写 `crisis`；本轮删除 `pending` 占位，pipeline 直接调用 `map_risk_level` |
 | **一致性阈值权威值在 grading** | [config.py](../app/grading/config.py) `CONSISTENCY_MIN_CONFIDENCE` | grading 侧已定义 0.6；`app/analysis/config.py` 仍用本地常量，迁移时机待定 |
 | **分级为纯函数、只出口工单草案** | `app/grading/*`（`build_ticket` 只返回 dict） | 不读写库/文件/网络，不产生处置动作；色码不进入用户端路径 |
 | **`review_reason` 承载规则 8 覆写** | [models.py](../app/grading/models.py)、[ticket.py](../app/grading/ticket.py) | `compose` 签名不增参；`AnalysisResult` 不含 `capture_status`，由 backend 用 `replace(..., review_reason="capture_degraded")` 覆写后建 P0+recapture 单 |
+| **低一致性 P0 由 `manual_review` 驱动** | [ticket.py](../app/grading/ticket.py) | 规则 5 与色码无关；`review_reason="consistency_conflict"` 只描述原因，不改档位 |
+| **复盘窗口按自然日、DB 存 `YYYY-MM-DD`** | [integration.py](../app/api/integration.py)、db@1.4 §4 | 与 grading 证据 `window` 一致；同日多会话共用一个 `window_end`，靠 `UNIQUE(subject_id, window_end)` 幂等 |
+| **0 可用会话在上游拦截** | [admin.py](../app/api/routers/admin.py) `POST /api/admin/reviews` | 「可用会话」= `captured` + `analysis_status∈{done,degraded}`；0 条直接 `1005`，不落库、不建单 |
+| **analyze 同步完成分析 + 分级** | [sessions.py](../app/api/routers/sessions.py)、[integration.py](../app/api/integration.py) | 原型阶段 mock 分析耗时可接受；省去后台任务与轮询复杂度，失败只用 `analysis_status=failed` 表达 |
 
 ## 4. 当前未完成项与阻塞
 
@@ -137,15 +145,15 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 
 | 目录 | 内容 | 状态 |
 |---|---|---|
-| `app/analysis/` | 四路 mock、Schema 校验、一致性判定 | 已实现（`81a8499`）；真模型待接；`risk_level` 映射已由 grading 提供、待 wiring |
-| `app/grading/` | 五色规则、七日趋势偏移、合成封顶、工单草案 | 已实现（`67adee6`）；尚未接入 API |
-| `app/api/` | analyze 接入、review 查询、60 秒频控 | 骨架 + 用户端 / consent / 归属已实现（`4f5d1bf`），余项见下 |
-| `web/` | 用户端 3 页 + 管理端 4 页 | 未开始 |
+| `app/analysis/` | 四路 mock、Schema 校验、一致性判定 | 已实现；真模型待接；`risk_level` 已 wiring `map_risk_level`（本轮） |
+| `app/grading/` | 五色规则、七日趋势偏移、合成封顶、工单草案 | 已实现并接入 API（本轮）；低一致性 P0 已补 |
+| `app/api/` | analyze / reviews / tickets / dashboard | 已接入（本轮）；余项见下 |
+| `web/` | 用户端 3 页 + 管理端 4 页 | 骨架已实现（`601d33d`），待与真实 API 联调 |
 
 **API 剩余延期项**
 
-- `POST /api/sessions/{id}/analyze` 接入 `app/analysis`（当前仍返回 `5000 analysis_pipeline_not_ready`）；
-- review 查询与新复盘生成（`app/grading/` 已就绪，待 API 接入；接入时需注意 0 会话窗口在 API 层返回 `1005`，并对 `capture_status∈{partial,no_face,no_audio}` 覆写 `review_reason="capture_degraded"`）；
+- 复盘列表 `GET /api/admin/reviews`；
+- `GET /api/admin/subjects/{subject_id}` 与 `GET /api/admin/sessions/{id}/transcript`（管理端敏感面板）；
 - 60 秒重复建会话频控（`1006`）；
 - `capture_busy` 专用业务码（当前复用 `code=5000`）。
 
@@ -165,17 +173,19 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 4. **500 响应缺 CORS 头**：未捕获异常由最外层 `ServerErrorMiddleware` 处理，浏览器跨域读不到该信封；`X-Request-Id` 与 `request_id` 仍在。
 5. **麦克风音量**：本机默认输入曾长期近乎静音（峰值 7/32768、`speech_ratio=0`），最后一次正式验证为 `ok`（`speech_ratio=0.3153`），现场部署前需复核设备与增益。
 6. **真实模型未接**：四路均为确定性 mock，Provider 选型与降级策略未定 —— 待确认。
-7. **`risk_level` 占位待替换**：[generate_overall_risk_level()](../app/analysis/pipeline.py#L29-L32) 仍返回 `pending`（不在 schema 枚举内）；`app/grading/config.py` 已提供 `map_risk_level`，但尚未 wiring 进 pipeline，backend 接入前调用方仍须显式提供风险生成器。
+7. **`risk_level` 已 wiring**：`generate_overall_risk_level(text_valence, intent_flag)` 直接返回 `map_risk_level`；阈值仍全部 `# TODO: 待标定`，正式上线前需业务确认。
 8. **部署需安装新依赖**：`requirements.txt` 已加入 `jsonschema[format]>=4.23,<5`，本地已安装，其他环境需重新安装。
 9. **文档漂移**：[architecture.md](./architecture.md#L53) 的存储路径仍是 `storage/{subject_id}/{session_id}/`，与 capture@1.2 不一致。
 10. **`capture_busy` 暂复用 `code=5000`**（`message=capture_busy`），尚无专用业务码。
-11. **grading 契约文档已同步（2026-11-24）**：`docs/contracts/grading.md` 与 `docs/grading.md` 已按实现驱动补记 `review_reason`、`RuleHit` 可选 `offset_score`/`insufficient`、`map_risk_level` 阈值键、工单覆写规则、`green→orange` 低一致性语义与规则 8 的 `red` 不封顶；`grading@1.2` 版本号与 `rule_version` 保持不变（附加、非破坏）。
+11. **契约已同步（2026-11-24）**：`grading.md` 补记规则 5 P0、复盘前提、工单主键归属与覆写顺序；`api.md` 补记 analyze / reviews / tickets / dashboard、窗口 `YYYY-MM-DD`、`1005 no_session_in_window`、consent 强校验；`ui.md` §3.1 统一两项齐备；`db.md` 补窗口格式与 0 会话不落库。版本号均保持不变（附加、非破坏）。
+12. **管理端前端仍用 mock**：`web/src/api/*` 已按契约声明端点，但 `AdminDashboard` 等页面尚未切真实 API；用户端 consent 按钮门禁需按 ui@1.2 补记调整为「两项齐备才可开始」。
+13. **analyze 为同步长请求**：mock 下可接受；接真模型后需评估超时或改后台任务，并复用 `deps.get_session_factory()` 注入。
 
 ## 5. 下一步顺序（建议）
 
-1. **backend-engineer**：把 `POST /api/sessions/{id}/analyze` 接入 `app/analysis`（`failed→2003`，`done/degraded` 落库并回写 `transcript_path` / `analysis_json` / `analysis_status`），接入 `app/grading/` 生成 `reviews` / `review_tickets`（规则 8 覆写 `review_reason`、0 会话窗口返回 `1005`），并用 `map_risk_level` 替换 analysis 的 `risk_level` 占位；补 review 查询与 60 秒频控。
-2. **fe-user / fe-admin**：先用户端 3 页，再管理端 4 页，严格对齐 ui@1.2（用户端不出现色码）。
-3. **qa-guard + privacy-check**：每轮合并前跑 qa-guard；涉及人脸/音频/心理数据的改动先过 privacy-check。
+1. **fe-user / fe-admin**：把 `web/src/api/*` 从 mock 切到真实端点；用户端 consent 主按钮改为「两项齐备才可开始」，管理端接 `tickets` / `dashboard` / `reviews`。
+2. **backend-engineer（余项）**：60 秒频控 `1006`、`capture_busy` 专用码、`GET /api/admin/reviews` 列表、转写查看与 `GET /api/admin/subjects/{id}`。
+3. **qa-guard + privacy-check**：每轮合并前跑 qa-guard；本轮新增 analyze/reviews/tickets 端点涉及心理与工单数据，合并前过 privacy-check。
 
 ## 6. 三条红线
 
@@ -207,7 +217,7 @@ jsonschema 4.26.0（含 format 校验依赖）
 ```
 
 ```powershell
-pytest tests -q                                                      # 212 passed
+pytest tests -q                                                      # 224 passed
 python -m app.db.init                                                # 建库（幂等）
 uvicorn app.api.main:app --port 8000                                 # /docs 可访问
 python scripts\seed_demo.py                                          # 演示数据（幂等；--reset 清空后重建）
@@ -216,12 +226,12 @@ python scripts\verify_capture.py --device 0 --seconds 5 --out storage/_debug   #
 git push origin main                                                 # 远程为 ssh.github.com:443（22 端口被阻断）
 ```
 
-测试构成：`tests/test_capture/` 6 条、`tests/test_db/` 13 条（含 3 条约束负例）、`tests/test_api/` 32 条（含用户端 / consent / 归属 / 假采集 / 失败 / 并发 / 生产守卫）、`tests/test_analysis/` 55 条（含场景、单模态、降级隔离、Schema、一致性、确定性与隐私）、`tests/test_grading/` 106 条（单次/趋势边界、封顶矩阵、取大六组合、工单字段与 due_at、幂等、`map_risk_level`、配置不变量）。
+测试构成：`tests/test_capture/` 6 条、`tests/test_db/` 13 条（含 3 条约束负例）、`tests/test_api/` 42 条（含用户端 / consent / 归属 / 假采集 / 失败 / 并发 / 生产守卫 / analyze 接入 / 复盘 / 工单 / 看板）、`tests/test_analysis/` 55 条（含场景、单模态、降级隔离、Schema、一致性、确定性与隐私）、`tests/test_grading/` 108 条（单次/趋势边界、封顶矩阵、取大六组合、工单字段与 due_at、低一致性 P0、幂等、`map_risk_level`、配置不变量）。
 
 ## 9. 待确认清单
 
 - 四路分析的真实 Provider 选型与降级策略；
-- `map_risk_level` 的 `text_valence` 分段阈值权威来源（已定义于 `app/grading/config.py`，全部 `# TODO: 待标定`，待 wiring）；
+- `map_risk_level` 的 `text_valence` 分段阈值权威来源（已定义于 `app/grading/config.py`，全部 `# TODO: 待标定`；已 wiring 进 pipeline，阈值仍待业务确认）；
 - 一致性阈值从 `app/analysis/config.py` 迁到 `app/grading/config.py` 的适配时机（grading 侧已定义权威值 0.6，analysis 仍用本地常量）；
 - 是否为 `app/analysis/` 打标签（如 `analysis-v1`）；
 - 是否为 `app/grading/` 打标签（如 `grading-v1`）；

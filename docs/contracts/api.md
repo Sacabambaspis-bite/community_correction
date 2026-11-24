@@ -9,6 +9,8 @@
 
 > v1.5 已冻结，后续仅接受实现驱动的变更。本版落地 `/api/user/*`、subject 会话归属校验与 consent 前置三闸；信封沿用 v1.4 的 `{code, message, data, degraded, request_id}`（业务码 HTTP 200、未捕获异常 HTTP 500），路由统一为 `/api/sessions` + `/api/admin/*` + `/api/user/*`。
 
+> **v1.5 实现补记（2026-11-24，附加、非破坏）**：`POST /api/sessions/{id}/analyze` 正式接入分析与分级；新增 `POST /api/admin/reviews`、`GET /api/admin/reviews/{review_id}`、`GET /api/admin/tickets`、`GET /api/admin/tickets/{ticket_id}`、`POST /api/admin/tickets/{ticket_id}/transition`、`GET /api/admin/dashboard` 的字段契约；明确复盘窗口为 `YYYY-MM-DD` 自然日、0 会话窗口返回 `1005 no_session_in_window`、consent 强校验口径。契约版本号不变。
+
 ---
 
 ## 1. 通用约定
@@ -18,6 +20,7 @@
 | 编码 | UTF-8，`application/json` |
 | 字段命名 | `snake_case`，与数据库一致 |
 | 时间 | ISO 8601 带时区 |
+| 复盘窗口 | `reviews.window_start` / `window_end` 使用 `YYYY-MM-DD` 自然日（含端点），与 grading 证据 `window` 数组一致 |
 | 分页 | query 参数 `page`（从 1 开始）、`page_size`（默认 20，最大 100） |
 | 幂等 | `POST /api/sessions/{id}/analyze` 重复调用返回首次结果 |
 | 路径参数 | `{session_id}`、`{subject_id}`、`{ticket_id}`、`{review_id}` 均为 UUID 字符串 |
@@ -72,8 +75,8 @@
 | 1001 | 参数错误 | 缺字段、类型不符、枚举越界 |
 | 1002 | 未认证 | 缺 token 或 token 无效 |
 | 1003 | 无权限 | 用户端 token 访问管理端接口 |
-| 1004 | 资源不存在 | session / subject / 面部图文件不存在 |
-| 1005 | 状态冲突 | 未同意就采集、工单已关闭 |
+| 1004 | 资源不存在 | session / subject / review / ticket / 面部图文件不存在 |
+| 1005 | 状态冲突 | 未同意就采集（`consent_revoked` / `consent_required` / `consent_incomplete`）、工单已关闭（`ticket_closed`）、复盘窗口无可用会话（`no_session_in_window`） |
 | 1006 | 频率限制 | 同一对象 60 秒内重复建会话 |
 | 2001 | 采集失败（无可用产物） | `sessions.status == failed`；`failed` 会话调用分析 |
 | 2003 | 分析失败（结果不可用） | `analysis_status=failed`，需重采或人工处理 |
@@ -122,7 +125,7 @@ Authorization: Bearer <token>
 |---|---|---|---|
 | `POST` | `/api/sessions` | 已实现 | 异步发起一次采集，立即返回 `created` |
 | `GET` | `/api/sessions/{session_id}` | 已实现 | 查询会话（前端轮询用） |
-| `POST` | `/api/sessions/{session_id}/analyze` | 占位 | 触发四路分析（仅 `staff`；本轮返回 `5000`） |
+| `POST` | `/api/sessions/{session_id}/analyze` | 已实现 | 触发四路分析与五色分级，落 `reviews` / `review_tickets`（仅 `staff`；见 §7.4） |
 
 ### 5.3 用户端（`/api/user/*`，需 `subject`）
 
@@ -144,13 +147,13 @@ Authorization: Bearer <token>
 | `GET` | `/api/admin/sessions` | 已实现 | 会话列表（`subject_id`、`status` 过滤） |
 | `GET` | `/api/admin/sessions/{session_id}/face` | 已实现 | 查看面部图（敏感，留痕） |
 | `GET` | `/api/admin/sessions/{session_id}/transcript` | 未实现 | 查看转写原文（敏感，留痕） |
-| `POST` | `/api/admin/reviews` | 未实现 | 按窗口计算复盘 |
+| `POST` | `/api/admin/reviews` | 已实现 | 按窗口计算复盘；0 可用会话返回 `1005 no_session_in_window`（见 §7.14） |
 | `GET` | `/api/admin/reviews` | 未实现 | 复盘列表 |
-| `GET` | `/api/admin/reviews/{review_id}` | 未实现 | 复盘详情（含证据链） |
-| `GET` | `/api/admin/tickets` | 未实现 | 复核队列 |
-| `GET` | `/api/admin/tickets/{ticket_id}` | 未实现 | 工单详情（留痕） |
-| `POST` | `/api/admin/tickets/{ticket_id}/transition` | 未实现 | 工单流转 |
-| `GET` | `/api/admin/dashboard` | 未实现 | 看板数据 |
+| `GET` | `/api/admin/reviews/{review_id}` | 已实现 | 复盘详情（含证据链）（见 §7.9） |
+| `GET` | `/api/admin/tickets` | 已实现 | 复核队列（见 §7.12） |
+| `GET` | `/api/admin/tickets/{ticket_id}` | 已实现 | 工单详情（留痕）（见 §7.13） |
+| `POST` | `/api/admin/tickets/{ticket_id}/transition` | 已实现 | 工单流转（见 §7.10） |
+| `GET` | `/api/admin/dashboard` | 已实现 | 看板数据（见 §7.11） |
 
 ## 6. 序列化脱敏规则
 
@@ -230,7 +233,8 @@ curl -X PUT http://localhost:8000/api/user/consent \
 ```
 
 - 入参：`subject_id`（body）、`face`（bool）、`audio`（bool）、`retention_days`（int，≥1）；
-- `face` 与 `audio` 至少一项为 `true`，否则 `1001`；`general.granted = face or audio`（同意任一模态即视为总体同意；缺失模态由 7.2 的 `consent_incomplete` 闸拦截）；
+- `face` 与 `audio` 至少一项为 `true`，否则 `1001`；`general.granted = face or audio`；
+- 单项授权仅用于记录本人意愿，**不构成可采集状态**：发起采集前 `face` 与 `audio` 必须同时为 `true`，否则 `POST /api/sessions` 返回 `1005 consent_incomplete`（见 7.2）。该强校验口径与 ui@1.2 §3.1 一致；
 - 成功后覆写 `subjects.consent_json`，`at` 取服务端当前时间，`revoked_at` 置 `null`。
 
 #### 7.1.3 `POST /api/user/consent/revoke`
@@ -414,7 +418,7 @@ curl http://localhost:8000/api/sessions/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f \
 - `code` 判定：`status == failed` → `2001`（`message=capture_failed`）；否则 `analysis_status == failed` → `2003`（`message=analysis_failed`）；其余 `code=0`；两种失败都仍返回会话摘要便于展示 `codes`；
 - 归属校验：`subject` 角色调用时必须带 query `subject_id`，且 `session.subject_id == subject_id`，否则 `1003`；缺 `subject_id` 返回 `1001`。`staff` 角色无需 `subject_id`、跳过归属校验。
 
-### 7.4 `POST /api/sessions/{session_id}/analyze`（占位）
+### 7.4 `POST /api/sessions/{session_id}/analyze`
 
 ```bash
 curl -X POST http://localhost:8000/api/sessions/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f/analyze \
@@ -423,9 +427,15 @@ curl -X POST http://localhost:8000/api/sessions/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d
 
 ```json
 {
-  "code": 5000,
-  "message": "analysis_pipeline_not_ready",
-  "data": null,
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
+    "analysis_status": "done",
+    "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b1c",
+    "review_created": true,
+    "ticket_id": "5e2f9b11-3c4d-4a6b-8e7f-0a1b2c3d4e5f"
+  },
   "degraded": [],
   "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
 }
@@ -436,11 +446,15 @@ curl -X POST http://localhost:8000/api/sessions/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d
 | 会话不存在 | `1004` |
 | `status == created` | `4000`，`message=session_not_captured` |
 | `status == failed` | `2001`，`message=capture_failed` |
-| `status == captured` | `5000`，`message=analysis_pipeline_not_ready`（本轮占位） |
+| `status == captured`，分析彻底失败 | `2003`，`message=analysis_failed`，`data` 为会话摘要（同 7.3） |
+| `status == captured`，分析可用 | `0`，`analysis_status` 为 `done` / `degraded` |
 | 非 `staff` token | `1003` |
 
-- 以上判断不落库、不改任何字段；
-- 分析管线接入后，`captured` 分支改为返回分析结果（`analysis_status` 决定 `degraded`），并恢复 `2003` 语义。
+- 分析可用时写回 `analysis_json` / `transcript_path`（ASR 成功时）/ `analysis_status`，再按会话所属自然日窗口生成复盘与工单；分析失败只写 `analysis_status=failed`，**不回写** `sessions.status`；
+- `degraded` 按 §2.1 组装（采集降级 + 分析降级）；
+- 幂等：`analysis_json` 已存在时复用，不重复跑分析；同一 `(subject_id, window_end)` 的复盘已存在时复用，不重复建单；`review_created=false` 表示复用；
+- `ticket_id` 为 `null` 表示未建单（仅「绿 + 不复核 + 非采集降级」会出现）；
+- 每次调用写一条 `audit_logs(action=session.analyze, target_type=session, target_id={session_id})`，`detail_json` 不含转写原文与路径；响应 `degraded` 按 §2.1 组装。
 
 ### 7.5 `GET /api/admin/sessions/{session_id}/face`
 
@@ -559,7 +573,7 @@ curl "http://localhost:8000/api/admin/sessions?subject_id=3b1e7c90-2f4a-4d51-8c6
 
 - `grading` 就绪后，`suggestion` 改由复盘结果派生，但脱敏边界（仅返回 `status` / `summary_text` / `suggestion` / `next_action`）保持不变。
 
-### 7.9 `GET /api/admin/reviews/{review_id}`（未实现）
+### 7.9 `GET /api/admin/reviews/{review_id}`
 
 ```json
 {
@@ -568,8 +582,8 @@ curl "http://localhost:8000/api/admin/sessions?subject_id=3b1e7c90-2f4a-4d51-8c6
   "data": {
     "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b1c",
     "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
-    "window_start": "2026-11-17T00:00:00+08:00",
-    "window_end": "2026-11-23T23:59:59+08:00",
+    "window_start": "2026-11-17",
+    "window_end": "2026-11-23",
     "window_days": 7,
     "single_session_risk": "none",
     "trend_color": "blue",
@@ -577,12 +591,12 @@ curl "http://localhost:8000/api/admin/sessions?subject_id=3b1e7c90-2f4a-4d51-8c6
     "consistency": "medium",
     "manual_review": false,
     "rules_fired": ["R_TREND_BLUE"],
-    "grading_version": "grading@1.1",
+    "grading_version": "grading@1.2",
     "evidence": [
       {
         "rule_id": "R_TREND_BLUE",
-        "rule_version": "grading@1.1",
-        "field_path": "psych.output.signal_strength",
+        "rule_version": "grading@1.2",
+        "field_path": "channels.psych.output.signal_strength",
         "observed_value": 41.2,
         "threshold_key": "TREND_BLUE_OFFSET_MIN",
         "threshold_value": 0.8,
@@ -599,7 +613,11 @@ curl "http://localhost:8000/api/admin/sessions?subject_id=3b1e7c90-2f4a-4d51-8c6
 }
 ```
 
-### 7.10 `POST /api/admin/tickets/{ticket_id}/transition`（未实现）
+- `window_start` / `window_end` 为 `YYYY-MM-DD` 自然日（含端点），与证据 `window` 一致；
+- `evidence` 原样返回 `reviews.evidence_json`；`offset_score` / `insufficient` / `window` 为可选字段，按实际存在返回；
+- `review_id` 不存在返回 `1004`；非 `staff` 返回 `1003`。
+
+### 7.10 `POST /api/admin/tickets/{ticket_id}/transition`
 
 ```bash
 curl -X POST http://localhost:8000/api/admin/tickets/5e2f9b11-3c4d-4a6b-8e7f-0a1b2c3d4e5f/transition \
@@ -636,11 +654,15 @@ curl -X POST http://localhost:8000/api/admin/tickets/5e2f9b11-3c4d-4a6b-8e7f-0a1
 
 | 动作 | 必填 | 失败返回 |
 |---|---|---|
-| `confirm` | — | 工单非 `pending` → `1005` |
-| `correct` | `conclusion_color`、`note` | 缺字段 → `1001` |
-| `close` | `note` | 缺字段 → `1001` |
+| `confirm` | — | 工单已 `closed` → `1005`，`message=ticket_closed` |
+| `correct` | `conclusion_color`、`note` | 缺字段 → `1001`；已 `closed` → `1005 ticket_closed` |
+| `close` | `note` | 缺字段 → `1001`；已 `closed` → `1005 ticket_closed` |
 
-### 7.11 `GET /api/admin/dashboard`（未实现）
+- 单次请求原子落到终态 `closed` 并写 `closed_at`；`confirm` / `correct` 的中间态只体现在 `audit_logs(action=ticket.transition, detail_json.action)`；
+- 每次流转写一条 `audit_logs`：`actor_type=staff`、`actor_id=assignee`（可选）、`action=ticket.transition`、`target_type=ticket`、`target_id={ticket_id}`、`detail_json` 含 `action` / `previous_status` / `conclusion_color` / `note`（`note` 为工作人员结论说明，可入审计；禁止写入音频、转写原文、面部图）；
+- 工单不存在 → `1004`；非 `staff` → `1003`。
+
+### 7.11 `GET /api/admin/dashboard`
 
 ```json
 {
@@ -662,6 +684,110 @@ curl -X POST http://localhost:8000/api/admin/tickets/5e2f9b11-3c4d-4a6b-8e7f-0a1
 ```
 
 > 看板按**单对象**聚合。不提供跨对象排行、榜单类字段。
+
+- query `subject_id` 可选：缺省时取「最近一次 `captured` 会话所属对象」，保证前端无需额外参数；库内无任何对象/会话时返回 `1004`；
+- `color_distribution` 统计该对象全部 `reviews.final_color`；`trend_7d` 按 `reviews.created_at` 所在自然日聚合，只返回近 7 个自然日内存在复盘的日期（同日多条取 `created_at` 最新），无复盘的日期不返回；
+- 不提供跨对象聚合。
+
+### 7.12 `GET /api/admin/tickets`
+
+```bash
+curl "http://localhost:8000/api/admin/tickets?status=pending&priority=P0&subject_id=3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c&page=1&page_size=20" \
+  -H "Authorization: Bearer admin_demo"
+```
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "items": [
+      {
+        "ticket_id": "5e2f9b11-3c4d-4a6b-8e7f-0a1b2c3d4e5f",
+        "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
+        "subject_name": "张某某",
+        "priority": "P0",
+        "final_color": "orange",
+        "triggered_rules": ["R_SINGLE_ORANGE"],
+        "opened_at": "2026-11-23T15:20:00+08:00",
+        "due_at": "2026-11-24T15:20:00+08:00",
+        "status": "pending"
+      }
+    ],
+    "page": 1,
+    "page_size": 20,
+    "total": 1
+  },
+  "degraded": [],
+  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
+}
+```
+
+- 过滤：`status`（`pending`/`confirmed`/`corrected`/`closed`）、`priority`（`P0`/`P1`/`P2`）、`subject_id`、分页；非法枚举 → `1001`；
+- 排序：`priority ASC, opened_at DESC`（P0 置顶）；
+- `final_color` 来自关联 `reviews.final_color`；`subject_name` 取 `subjects.name`。
+
+### 7.13 `GET /api/admin/tickets/{ticket_id}`
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "ticket_id": "5e2f9b11-3c4d-4a6b-8e7f-0a1b2c3d4e5f",
+    "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
+    "subject_name": "张某某",
+    "priority": "P0",
+    "final_color": "orange",
+    "triggered_rules": ["R_SINGLE_ORANGE"],
+    "rules_fired": ["R_SINGLE_ORANGE"],
+    "suggested_method": "priority_interview",
+    "status": "pending",
+    "opened_at": "2026-11-23T15:20:00+08:00",
+    "due_at": "2026-11-24T15:20:00+08:00",
+    "evidence": [
+      {
+        "rule_id": "R_SINGLE_ORANGE",
+        "field_path": "channels.psych.output.signal_strength",
+        "observed_value": 72.5,
+        "threshold_key": "SINGLE_ORANGE_SIGNAL_MIN",
+        "threshold_value": 70,
+        "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f"
+      }
+    ],
+    "history": [
+      { "action": "opened", "actor": "system", "note": null, "at": "2026-11-23T15:20:00+08:00" },
+      { "action": "correct", "actor": "E1024", "note": "面谈确认…", "at": "2026-11-23T15:25:00+08:00" }
+    ]
+  },
+  "degraded": [],
+  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
+}
+```
+
+- `evidence` 原样返回 `review_tickets.evidence_json`（可选字段按实际存在返回）；
+- `history` 由 `audit_logs(action=ticket.transition)` 按时间升序组装，并补一条 `opened` / `system` 的建单记录；流转记录的 `actor` 取审计 `actor_id`（即 `assignee`），未提供时回落 `"staff"`；
+- 读取成功前写一条 `audit_logs(action=sensitive.view, target_type=ticket, target_id={ticket_id}, detail_json={"field":"ticket"})`；留痕失败 → `5000 audit_write_failed`，不返回数据；
+- 不存在 → `1004`；非 `staff` → `1003`。
+
+### 7.14 `POST /api/admin/reviews`
+
+窗口复盘（手动补算 / 演示）。入参：
+
+```json
+{ "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c", "window_end": "2026-11-23", "window_days": 7 }
+```
+
+```json
+{ "code": 0, "message": "ok", "data": { "...": "同 §7.9 ReviewDetail" }, "degraded": [], "request_id": "..." }
+```
+
+- `subject_id` 必填；`window_end` 可选（默认今天，`YYYY-MM-DD`）；`window_days` 可选（默认 7，≥1）；非法 → `1001`；对象不存在 → `1004`；
+- 窗口 `[window_end - (window_days - 1), window_end]`，按自然日；
+- **可用会话** = `sessions.status = captured` 且 `analysis_status in (done, degraded)`；窗口内 0 条 → `1005`、`message=no_session_in_window`，**不落库、不建单**；
+- 有可用会话时，取窗口内 `captured_at` 最新的一条作为 `source_session_id`，执行 `evaluate_session → evaluate_period → compose`；`capture_status in (partial, no_face, no_audio)` 时覆写 `review_reason="capture_degraded"` 后再 `build_ticket`；
+- 同一 `(subject_id, window_end)` 已存在复盘时直接返回该复盘（幂等），不重复建单；
+- 成功写 `audit_logs(action=review.create, target_type=review, target_id={review_id})`。
 
 ## 8. 前端联调 mock
 
@@ -692,3 +818,4 @@ mock 数据必须与本节示例字段完全一致，不得增删字段。
 | 1.3 | 2026-11-23 | 补 `created` 会话不可分析、不计入复盘 |
 | 1.4 | 2026-11-23 | 信封改为 `{code,message,data,degraded,request_id}`（中间件 uuid4 + `X-Request-Id` + 日志/audit）；业务码 HTTP 200、未捕获异常 HTTP 500；路由统一为 `/api/sessions` + `/api/admin/*` + `/api/user/*`；`POST /api/sessions` 改异步 + 轮询；新增 `4000`；`5000` 增加 `analysis_pipeline_not_ready` / `capture_busy` 临时语义；鉴权改为 `USER_TOKEN` / `ADMIN_TOKEN`，`APP_ENV=production` 缺配置直接启动失败 |
 | 1.5 | 2026-11-24 | 落地 `/api/user/*`（consent 查询/提交/撤回、feedback）；明确 subject 身份由客户端声明 `subject_id`（GET 走 query、写操作走 body）+ 会话归属校验（越权 `1003`）；`POST /api/sessions` 补齐 consent 三道闸（`revoked` → `general` → `face/audio`），新增 `consent_incomplete`，消除 db.md §2.1 与 api 不一致；`feedback` 在 grading 就绪前用采集状态做中性映射；60s 频控（1006）、analyze 接入、review 查询仍延期 |
+| 1.5（实现补记） | 2026-11-24 | `analyze` 正式接入分析与五色分级（`2003`、幂等、`audit_logs(session.analyze)`）；新增 reviews（POST / GET 详情）、tickets（列表 / 详情 / 流转）、dashboard 契约；复盘窗口统一 `YYYY-MM-DD`；0 可用会话 → `1005 no_session_in_window`；consent 单项授权不可采集（`consent_incomplete`）；60s 频控仍延期 |
