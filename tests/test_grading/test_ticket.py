@@ -91,6 +91,28 @@ def test_priority_and_method_by_color(color, expect_priority, expect_method):
     assert ticket["suggested_method"] == expect_method
 
 
+# ---------- 规则 5：低一致性 manual_review 强制 P0 ----------
+
+@pytest.mark.parametrize(
+    "color,expect_method",
+    [
+        ("blue", "routine_checkin"),
+        ("yellow", "focused_interview"),
+    ],
+)
+def test_manual_review_forces_p0_and_keeps_color_method(color, expect_method):
+    final = _final(
+        color,
+        needs_review=True,
+        manual_review=True,
+        review_reason="consistency_conflict",
+    )
+    ticket = build_ticket(final, REVIEW_ID, SUBJECT_ID, NOW)
+    assert ticket["priority"] == "P0"
+    assert ticket["suggested_method"] == expect_method
+    assert ticket["due_at"].endswith("+08:00")
+
+
 # ---------- due_at 按 P 级 ----------
 
 @pytest.mark.parametrize("priority,expected", [

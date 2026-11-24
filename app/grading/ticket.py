@@ -37,6 +37,8 @@ def build_ticket(final: FinalGrading, review_id: str, subject_id: str, now: str)
     - 绿且 ``needs_review=False`` -> 抛 ``ValueError("ticket_not_allowed_for_green")``；
     - 「绿 + 降级」(``needs_review=True``) 允许建单；
     - ``review_reason=="capture_degraded"`` 覆写为 P0 + recapture（规则 8）；
+    - ``manual_review=True``（低一致性，规则 5）覆写 ``priority`` 为 P0，``suggested_method``
+      仍按最终色；
     - 幂等：相同输入 -> 相同输出，不含随机值。
     """
     reason = final.review_reason
@@ -51,6 +53,10 @@ def build_ticket(final: FinalGrading, review_id: str, subject_id: str, now: str)
         # 规则 6：降级补采
         priority = "P1"
         suggested_method = "recapture"
+    elif final.manual_review:
+        # 规则 5：低一致性强制人工复核，24 小时内处理；复核方式仍按最终色
+        priority = "P0"
+        suggested_method = SUGGESTED_METHOD[final.final_color]
     else:
         priority = _COLOR_PRIORITY[final.final_color]
         suggested_method = SUGGESTED_METHOD[final.final_color]
