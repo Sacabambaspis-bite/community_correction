@@ -14,11 +14,13 @@ import {
 } from "../../components/common/StateViews";
 import { errorText } from "../../lib/errorMessages";
 import { ApiError } from "../../lib/http";
+import { isOverdueTicket, ticketSourceText } from "./ticketDisplay";
 import styles from "./Tickets.module.css";
 
 const STATUS_TEXT: Record<string, string> = {
   pending: "待复核",
   confirmed: "已确认",
+  corrected: "已修正",
   closed: "已关闭",
 };
 
@@ -34,7 +36,10 @@ type AppliedQuery = {
   subject_id: string;
 };
 
-function formatTime(value: string): string {
+function formatTime(value: string | null): string {
+  if (!value) {
+    return "未设置";
+  }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return value;
@@ -43,7 +48,7 @@ function formatTime(value: string): string {
 }
 
 function isOverdue(item: TicketListItem): boolean {
-  if (item.status === "closed") {
+  if (item.status === "closed" || item.due_at === null) {
     return false;
   }
   const due = new Date(item.due_at).getTime();
@@ -199,6 +204,7 @@ export default function TicketsPage() {
               <tr>
                 <th className={styles.th}>优先级</th>
                 <th className={styles.th}>对象</th>
+                <th className={styles.th}>工单来源</th>
                 <th className={styles.th}>当前色码</th>
                 <th className={styles.th}>触发规则</th>
                 <th className={styles.th}>建单时间</th>
@@ -232,11 +238,24 @@ export default function TicketsPage() {
                       </span>
                     </td>
                     <td className={styles.td}>
-                      <ColorBadge
-                        color={item.final_color}
-                        rules={item.triggered_rules}
-                        evidenceHref={`/admin/tickets/${item.ticket_id}`}
-                      />
+                      <span
+                        className={isOverdueTicket(item) ? styles.overdueSource : undefined}
+                      >
+                        {ticketSourceText(item)}
+                      </span>
+                    </td>
+                    <td className={styles.td}>
+                      {item.final_color ? (
+                        <ColorBadge
+                          color={item.final_color}
+                          rules={item.triggered_rules}
+                          evidenceHref={`/admin/tickets/${item.ticket_id}`}
+                        />
+                      ) : (
+                        <span className={styles.muted}>
+                          {isOverdueTicket(item) ? "逾期工单，无分析色码" : "暂无分析色码"}
+                        </span>
+                      )}
                     </td>
                     <td className={styles.td}>
                       {item.triggered_rules.length > 0

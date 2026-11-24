@@ -5,19 +5,23 @@ import type {
   ConsentData,
   Envelope,
   FeedbackData,
+  SessionAnalysisData,
   SessionCreateData,
   SessionData,
+  SessionKind,
+  SessionStopData,
+  UserTasksData,
 } from "./types";
 
 export type ConsentPayload = {
   face: boolean;
   audio: boolean;
-  retention_days: number;
 };
 
 export type CreateSessionPayload = {
+  kind: SessionKind;
   device_index?: number;
-  duration_sec?: number;
+  duration_sec?: number | null;
 };
 
 export function getConsent(
@@ -50,14 +54,34 @@ export function revokeConsent(
   });
 }
 
+export function getTasks(
+  subjectId: string = SUBJECT_ID,
+): Promise<Envelope<UserTasksData>> {
+  return request<UserTasksData>("/api/user/tasks", {
+    role: "user",
+    query: { subject_id: subjectId },
+  });
+}
+
 export function createSession(
-  payload: CreateSessionPayload = {},
+  payload: CreateSessionPayload,
   subjectId: string = SUBJECT_ID,
 ): Promise<Envelope<SessionCreateData>> {
   return request<SessionCreateData>("/api/sessions", {
     method: "POST",
     role: "user",
     body: { subject_id: subjectId, ...payload },
+  });
+}
+
+export function stopSession(
+  sessionId: string,
+  subjectId: string = SUBJECT_ID,
+): Promise<Envelope<SessionStopData>> {
+  return request<SessionStopData>(`/api/sessions/${sessionId}/stop`, {
+    method: "POST",
+    role: "user",
+    query: { subject_id: subjectId },
   });
 }
 
@@ -69,6 +93,15 @@ export function getSession(
   return request<SessionData>(`/api/sessions/${sessionId}`, {
     role: "user",
     query: { subject_id: subjectId },
+  });
+}
+
+export function analyzeSession(
+  sessionId: string,
+): Promise<Envelope<SessionAnalysisData>> {
+  return request<SessionAnalysisData>(`/api/sessions/${sessionId}/analyze`, {
+    method: "POST",
+    role: "admin",
   });
 }
 

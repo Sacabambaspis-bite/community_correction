@@ -1,9 +1,10 @@
-/* 采集引导页：发起会话 → 每 1s 轮询会话状态 → 成功后跳结果页（ui@1.2 §3.2、api@1.5 §7.2/§7.3）。
- * 本轮不调用 getUserMedia / MediaRecorder，倒计时仅前端占位计数。
+/* 录音思想汇报子页：手动创建/停止 report 会话，停止后轮询并跳结果页。
+ * 对应 ui@1.2 §3.2/§3.4 与补记 4、api@1.5 §7.2/§7.3 与补记·三。
+ * 本轮不调用 getUserMedia / MediaRecorder，正计时仅用于展示采集状态。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { createSession, getSession } from "../../api/user";
+import { createSession, getSession, stopSession } from "../../api/user";
 import type { CaptureStatus } from "../../api/types";
 import {
   ErrorBanner,
@@ -17,7 +18,7 @@ import { CaptureResult } from "./CaptureResult";
 import { RecordingIndicator } from "./RecordingIndicator";
 import styles from "./Capture.module.css";
 
-const CAPTURE_SECONDS = 10;
+const RECORDING_TICK_MS = 1000;
 const POLL_INTERVAL_MS = 1000;
 
 type Phase = "idle" | "starting" | "recording" | "waiting" | "failed" | "error";
@@ -27,22 +28,37 @@ type FailureState = {
   code?: number;
 };
 
+function requestErrorText(error: unknown): string {
+  return error instanceof ApiError
+    ? errorText(error.code, error.message)
+    : "网络异常，请检查连接后重试。";
+}
+
 export default function CapturePage() {
   const navigate = useNavigate();
   const [phase, setPhase] = useState<Phase>("idle");
-  const [secondsLeft, setSecondsLeft] = useState(CAPTURE_SECONDS);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [failure, setFailure] = useState<FailureState | null>(null);
 
-  const intervalRef = useRef<number | null>(null);
-  const startedAtRef = useRef(0);
+  const recordingTimerRef = useRef<number | null>(null);
+  const pollTimerRef = useRef<number | null>(null);
   const aliveRef = useRef(true);
+  const runIdRef = useRef(0);
+  const stopRequestedRef = useRef(false);
+
+  const stopRecordingTimer = useCallback(() => {
+    if (recordingTimerRef.current !== null) {
+      window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+  }, []);
 
   const stopPolling = useCallback(() => {
-    if (intervalRef.current !== null) {
-      window.clearInterval(intervalRef.current);
-      intervalRef.current = null;
+    if (pollTimerRef.current !== null) {
+      window.clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
     }
   }, []);
 
@@ -50,24 +66,37 @@ export default function CapturePage() {
     aliveRef.current = true;
     return () => {
       aliveRef.current = false;
+      runIdRef.current += 1;
+      stopRecordingTimer();
       stopPolling();
     };
-  }, [stopPolling]);
+  }, [stopPolling, stopRecordingTimer]);
 
   const handleFailure = useCallback(
     (captureStatus: CaptureStatus | null, code?: number) => {
+      stopRecordingTimer();
       stopPolling();
       setFailure({ captureStatus, code });
       setPhase("failed");
     },
-    [stopPolling],
+    [stopPolling, stopRecordingTimer],
+  );
+
+  const handleError = useCallback(
+    (message: string) => {
+      stopRecordingTimer();
+      stopPolling();
+      setError(message);
+      setPhase("error");
+    },
+    [stopPolling, stopRecordingTimer],
   );
 
   const pollSession = useCallback(
-    async (id: string) => {
+    async (id: string, runId: number) => {
       try {
         const envelope = await getSession(id);
-        if (!aliveRef.current) {
+        if (!aliveRef.current || runId !== runIdRef.current) {
           return;
         }
         if (envelope.code === 2001) {
@@ -79,9 +108,7 @@ export default function CapturePage() {
           return;
         }
         if (envelope.code !== 0 || envelope.data === null) {
-          stopPolling();
-          setError(errorText(envelope.code, envelope.message));
-          setPhase("error");
+          handleError(errorText(envelope.code, envelope.message));
           return;
         }
         if (envelope.data.status === "captured") {
@@ -93,85 +120,93 @@ export default function CapturePage() {
           handleFailure(envelope.data.capture_status, 2001);
           return;
         }
+        pollTimerRef.current = window.setTimeout(() => {
+          void pollSession(id, runId);
+        }, POLL_INTERVAL_MS);
       } catch (error) {
-        if (!aliveRef.current) {
+        if (!aliveRef.current || runId !== runIdRef.current) {
           return;
         }
-        stopPolling();
-        setError(
-          error instanceof ApiError
-            ? errorText(error.code, error.message)
-            : "网络异常，请检查连接后重试。",
-        );
-        setPhase("error");
+        handleError(requestErrorText(error));
       }
     },
-    [handleFailure, navigate, stopPolling],
+    [handleError, handleFailure, navigate, stopPolling],
   );
 
   const handleStart = useCallback(async () => {
+    stopRecordingTimer();
     stopPolling();
+    const runId = ++runIdRef.current;
+    stopRequestedRef.current = false;
     setFailure(null);
     setError(null);
     setSessionId(null);
-    setSecondsLeft(CAPTURE_SECONDS);
+    setElapsedSeconds(0);
     setPhase("starting");
 
     try {
-      const envelope = await createSession({ duration_sec: CAPTURE_SECONDS });
-      if (!aliveRef.current) {
+      const envelope = await createSession({ kind: "report" });
+      if (!aliveRef.current || runId !== runIdRef.current) {
         return;
       }
       if (envelope.code !== 0 || envelope.data === null) {
-        setError(errorText(envelope.code, envelope.message));
-        setPhase("error");
+        handleError(errorText(envelope.code, envelope.message));
         return;
       }
 
-      const id = envelope.data.session_id;
-      setSessionId(id);
-      startedAtRef.current = Date.now();
+      setSessionId(envelope.data.session_id);
       setPhase("recording");
-
-      intervalRef.current = window.setInterval(() => {
-        if (!aliveRef.current) {
-          return;
+      recordingTimerRef.current = window.setInterval(() => {
+        if (aliveRef.current && runId === runIdRef.current) {
+          setElapsedSeconds((current) => current + 1);
         }
-        const elapsed = Math.floor((Date.now() - startedAtRef.current) / 1000);
-        const left = Math.max(0, CAPTURE_SECONDS - elapsed);
-        setSecondsLeft(left);
-        if (left === 0) {
-          setPhase((current) => (current === "recording" ? "waiting" : current));
-        }
-        void pollSession(id);
-      }, POLL_INTERVAL_MS);
+      }, RECORDING_TICK_MS);
     } catch (error) {
-      if (!aliveRef.current) {
+      if (!aliveRef.current || runId !== runIdRef.current) {
         return;
       }
-      setError(
-        error instanceof ApiError
-          ? errorText(error.code, error.message)
-          : "网络异常，请检查连接后重试。",
-      );
-      setPhase("error");
+      handleError(requestErrorText(error));
     }
-  }, [pollSession, stopPolling]);
+  }, [handleError, stopPolling, stopRecordingTimer]);
 
-  const handleStop = useCallback(() => {
-    stopPolling();
-    if (sessionId) {
-      navigate(`/feedback/${sessionId}`);
+  const handleStop = useCallback(async () => {
+    if (stopRequestedRef.current) {
       return;
     }
-    setPhase("idle");
-  }, [navigate, sessionId, stopPolling]);
+    if (!sessionId) {
+      handleError("录音会话尚未创建，请重新开始。");
+      return;
+    }
+
+    stopRequestedRef.current = true;
+    const id = sessionId;
+    const runId = runIdRef.current;
+    stopRecordingTimer();
+    setPhase("waiting");
+
+    try {
+      const envelope = await stopSession(id);
+      if (!aliveRef.current || runId !== runIdRef.current) {
+        return;
+      }
+      if (envelope.code !== 0 || envelope.data === null) {
+        handleError(errorText(envelope.code, envelope.message));
+        return;
+      }
+      void pollSession(id, runId);
+    } catch (error) {
+      if (!aliveRef.current || runId !== runIdRef.current) {
+        return;
+      }
+      handleError(requestErrorText(error));
+    }
+  }, [handleError, pollSession, sessionId, stopRecordingTimer]);
 
   return (
     <main className={styles.page}>
       <PageTitle
-        title="采集引导"
-        description={`本次采集约 ${CAPTURE_SECONDS} 秒，采集过程中页面会一直显示红点与「正在采集」提示。`}
+        title="录音思想汇报"
+        description="请按提示进行思想汇报录音，采集过程中页面会一直显示红点与「正在采集」提示；结束后请手动点击「结束录音」。"
       />
 
       <CaptureGuide />
@@ -184,7 +219,7 @@ export default function CapturePage() {
               className={styles.primaryButton}
               onClick={() => void handleStart()}
             >
-              开始
+              开始录音
             </button>
           </div>
           <p className={styles.hint}>
@@ -195,24 +230,24 @@ export default function CapturePage() {
 
       {phase === "starting" ? <LoadingState text="正在发起采集…" /> : null}
 
-      {phase === "recording" || phase === "waiting" ? (
+      {phase === "recording" ? (
         <section className={styles.recordBox}>
-          <RecordingIndicator secondsLeft={secondsLeft} />
-          <p className={styles.hint}>
-            {phase === "recording"
-              ? "请正视摄像头，说出今天的情况。"
-              : "采集已结束，正在等待处理结果，请稍候。"}
-          </p>
+          <RecordingIndicator elapsedSeconds={elapsedSeconds} />
+          <p className={styles.hint}>请正视摄像头，说出今天的情况。</p>
           <div className={styles.actionRow}>
             <button
               type="button"
               className={styles.secondaryButton}
-              onClick={handleStop}
+              onClick={() => void handleStop()}
             >
-              结束
+              结束录音
             </button>
           </div>
         </section>
+      ) : null}
+
+      {phase === "waiting" ? (
+        <LoadingState text="正在保存与处理，请稍候" />
       ) : null}
 
       {phase === "failed" && failure ? (
@@ -232,6 +267,8 @@ export default function CapturePage() {
       ) : null}
 
       <p className={styles.footerHint}>
+        <Link to="/capture">返回模块选择</Link>
+        {" · "}
         <Link to="/consent">查看或撤回知情同意</Link>
       </p>
     </main>

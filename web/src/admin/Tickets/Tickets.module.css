@@ -155,6 +155,11 @@
   font-weight: 600;
 }
 
+.overdueSource {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
 .overdueTag {
   display: inline-block;
   margin-left: var(--space-2);

@@ -16,11 +16,17 @@ import { errorText } from "../../../lib/errorMessages";
 import { ApiError } from "../../../lib/http";
 import { EvidenceTable } from "../EvidenceTable";
 import { TicketActions } from "../TicketActions";
+import {
+  isOverdueTicket,
+  suggestedMethodText,
+  ticketSourceText,
+} from "../ticketDisplay";
 import styles from "../Tickets.module.css";
 
 const STATUS_TEXT: Record<string, string> = {
   pending: "待复核",
   confirmed: "已确认",
+  corrected: "已修正",
   closed: "已关闭",
 };
 
@@ -44,8 +50,8 @@ function formatTime(value: string | null): string {
   return date.toLocaleString("zh-CN", { hour12: false });
 }
 
-function isOverdue(dueAt: string, status: string): boolean {
-  if (status === "closed") {
+function isOverdue(dueAt: string | null, status: string): boolean {
+  if (status === "closed" || !dueAt) {
     return false;
   }
   const due = new Date(dueAt).getTime();
@@ -123,6 +129,16 @@ export default function TicketDetailPage() {
                 </span>
               </div>
               <div className={styles.infoItem}>
+                <span className={styles.infoLabel}>工单来源</span>
+                <span
+                  className={`${styles.infoValue} ${
+                    isOverdueTicket(ticket) ? styles.overdueSource : ""
+                  }`}
+                >
+                  {ticketSourceText(ticket)}
+                </span>
+              </div>
+              <div className={styles.infoItem}>
                 <span className={styles.infoLabel}>优先级</span>
                 <span className={styles.infoValue}>{ticket.priority}</span>
               </div>
@@ -139,7 +155,7 @@ export default function TicketDetailPage() {
                       : styles.infoValue
                   }
                 >
-                  {formatTime(ticket.due_at)}
+                  {formatTime(ticket.due_at) || "未设置"}
                   {isOverdue(ticket.due_at, ticket.status) ? (
                     <span className={styles.overdueTag}>已超期</span>
                   ) : null}
@@ -147,7 +163,9 @@ export default function TicketDetailPage() {
               </div>
               <div className={styles.infoItem}>
                 <span className={styles.infoLabel}>建议方式</span>
-                <span className={styles.infoValue}>{ticket.suggested_method ?? "—"}</span>
+                <span className={styles.infoValue}>
+                  {suggestedMethodText(ticket.suggested_method)}
+                </span>
               </div>
               <div className={styles.infoItem}>
                 <span className={styles.infoLabel}>状态</span>
@@ -161,16 +179,28 @@ export default function TicketDetailPage() {
           <section className={styles.section}>
             <h2 className={styles.sectionTitle}>结论区</h2>
             <div className={styles.resultRow}>
-              <ColorBadge
-                color={ticket.final_color}
-                rules={
-                  ticket.rules_fired.length > 0 ? ticket.rules_fired : ticket.triggered_rules
-                }
-                evidenceHref="#evidence-chain"
-              />
+              {ticket.final_color ? (
+                <ColorBadge
+                  color={ticket.final_color}
+                  rules={
+                    ticket.rules_fired.length > 0
+                      ? ticket.rules_fired
+                      : ticket.triggered_rules
+                  }
+                  evidenceHref="#evidence-chain"
+                />
+              ) : (
+                <div className={styles.resultBox}>
+                  <strong>{ticketSourceText(ticket)}</strong>
+                  <span>该工单未关联分析复盘，不展示五色分析结论。</span>
+                  <a href="#evidence-chain">查看来源与证据</a>
+                </div>
+              )}
             </div>
             <p className={styles.hint}>
-              色码与命中规则、证据链入口同屏展示；证据字段见下一区块。
+              {ticket.final_color
+                ? "色码与命中规则、证据链入口同屏展示；证据字段见下一区块。"
+                : "逾期来源、建议方式与证据入口同屏展示；逾期判定不进入分析管线。"}
             </p>
           </section>
 

@@ -26,6 +26,10 @@
   word-break: break-all;
 }
 
+.subjectOverdue {
+  margin-top: var(--space-3);
+}
+
 .infoLine {
   margin-bottom: var(--space-2);
   font-size: 14px;

@@ -56,16 +56,37 @@ export type Coverage = "both" | "face_only" | "audio_only";
 
 export type SessionStatus = "created" | "captured" | "failed";
 
+export type SessionKind = "checkin" | "report";
+
+/** api@1.5 补记·二：GET /api/user/tasks */
+export type UserTaskData = {
+  interval_days: number;
+  last_completed_at: string | null;
+  overdue: boolean;
+};
+
+export type UserTasksData = {
+  checkin: UserTaskData;
+  report: UserTaskData;
+};
+
 /** api@1.5 §7.2 POST 返回 */
 export type SessionCreateData = {
   session_id: string;
   status: "created";
+  kind: SessionKind;
+};
+
+/** api@1.5 补记·三：POST /api/sessions/{id}/stop 返回。 */
+export type SessionStopData = {
+  session_id: string;
 };
 
 /** api@1.5 §7.3 */
 export type SessionData = {
   session_id: string;
   subject_id: string;
+  kind: SessionKind;
   status: SessionStatus;
   capture_status: CaptureStatus | null;
   coverage: Coverage | null;
@@ -77,6 +98,15 @@ export type SessionData = {
   codes: string[];
   created_at: string;
   updated_at: string;
+};
+
+/** api@1.5 §7.4 */
+export type SessionAnalysisData = {
+  session_id: string;
+  analysis_status: "done" | "degraded";
+  review_id: string;
+  review_created: boolean;
+  ticket_id: string | null;
 };
 
 /* ---------- 用户端 feedback ---------- */
@@ -94,7 +124,9 @@ export type FeedbackData = {
 
 /* ---------- 管理端 ---------- */
 
-/** api@1.5 §7.6 */
+export type SubjectOverdue = Record<SessionKind, boolean>;
+
+/** api@1.5 §7.6 与补记·二：对象列表、详情共用摘要。 */
 export type SubjectListItem = {
   subject_id: string;
   code: string;
@@ -105,12 +137,29 @@ export type SubjectListItem = {
   latest_rules: string[];
   pending_tickets: number;
   latest_session_at: string | null;
+  checkin_interval_days: number;
+  report_interval_days: number;
+  overdue: SubjectOverdue;
 };
 
-/** api@1.5 §7.7 */
+export type SubjectDetail = SubjectListItem;
+
+export type SubjectFrequencyPayload = {
+  checkin_interval_days?: number;
+  report_interval_days?: number;
+};
+
+export type SubjectFrequencyData = {
+  subject_id: string;
+  checkin_interval_days: number;
+  report_interval_days: number;
+};
+
+/** api@1.5 §7.7；kind 用于区分签到与思想汇报。 */
 export type AdminSessionItem = {
   session_id: string;
   subject_id: string;
+  kind: SessionKind;
   status: SessionStatus;
   capture_status: CaptureStatus | null;
   coverage: Coverage | null;
@@ -118,17 +167,23 @@ export type AdminSessionItem = {
   captured_at: string | null;
 };
 
-/** ui@1.2 §4.4 列表列 + ticket_id；api@1.5 尚无 tickets 列表示例 */
+export type TicketDetailJson = {
+  overdue_kind?: SessionKind;
+  overdue_days?: number;
+};
+
+/** ui@1.2 §4.4；逾期工单无复盘色码，且可不设截止时间。 */
 export type TicketListItem = {
   ticket_id: string;
   subject_id: string;
   subject_name: string | null;
   priority: string;
-  final_color: Color;
+  final_color: Color | null;
   triggered_rules: string[];
   opened_at: string;
-  due_at: string;
+  due_at: string | null;
   status: string;
+  detail_json: TicketDetailJson | null;
 };
 
 /** ui@1.2 §4.5 证据链表格列，字段沿用 api@1.5 §7.9 evidence */
@@ -148,7 +203,6 @@ export type TicketHistoryItem = {
   at: string;
 };
 
-/** api@1.5 无工单详情示例，按 ui@1.2 §4.5 区块推导 */
 export type TicketDetail = TicketListItem & {
   rules_fired: string[];
   suggested_method: string | null;
@@ -208,11 +262,12 @@ export type ReviewDetail = {
   created_at: string;
 };
 
-/** api@1.5 §7.11 */
+/** api@1.5 §7.11 与补记·二 */
 export type DashboardData = {
   subject_id: string;
   color_distribution: Record<Color, number>;
   trend_7d: { date: string; color: Color }[];
   pending_tickets: number;
   last_session_at: string | null;
+  overdue: SubjectOverdue;
 };

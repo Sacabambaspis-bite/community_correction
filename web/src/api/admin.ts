@@ -9,6 +9,9 @@ import type {
   Envelope,
   Paged,
   ReviewDetail,
+  SubjectDetail,
+  SubjectFrequencyData,
+  SubjectFrequencyPayload,
   SubjectListItem,
   TicketDetail,
   TicketListItem,
@@ -45,6 +48,28 @@ export function getSubjects(
     role: "admin",
     query,
   });
+}
+
+export function getSubject(
+  subjectId: string,
+): Promise<Envelope<SubjectDetail>> {
+  return request<SubjectDetail>(`/api/admin/subjects/${encodeURIComponent(subjectId)}`, {
+    role: "admin",
+  });
+}
+
+export function updateFrequency(
+  subjectId: string,
+  payload: SubjectFrequencyPayload,
+): Promise<Envelope<SubjectFrequencyData>> {
+  return request<SubjectFrequencyData>(
+    `/api/admin/subjects/${encodeURIComponent(subjectId)}/frequency`,
+    {
+      method: "PATCH",
+      role: "admin",
+      body: payload,
+    },
+  );
 }
 
 export function getSessions(

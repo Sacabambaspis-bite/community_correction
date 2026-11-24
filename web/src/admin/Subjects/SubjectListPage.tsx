@@ -2,8 +2,8 @@
  * 色码一律交给 ColorBadge 渲染，保证与规则编号、证据入口同屏。
  */
 import { useCallback, useEffect, useState } from "react";
-import { getSubjects } from "../../api/admin";
-import type { SubjectListItem } from "../../api/types";
+import { getSessions, getSubjects } from "../../api/admin";
+import type { AdminSessionItem, SubjectListItem } from "../../api/types";
 import {
   EmptyState,
   ErrorBanner,
@@ -25,6 +25,8 @@ export default function SubjectListPage() {
   const [status, setStatus] = useState("");
   const [applied, setApplied] = useState<AppliedQuery>({ keyword: "", status: "" });
   const [items, setItems] = useState<SubjectListItem[]>([]);
+  const [sessionItems, setSessionItems] = useState<AdminSessionItem[]>([]);
+  const [recentError, setRecentError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -32,6 +34,8 @@ export default function SubjectListPage() {
   const loadSubjects = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setRecentError(null);
+    setSessionItems([]);
     try {
       const envelope = await getSubjects({
         keyword: applied.keyword || undefined,
@@ -43,8 +47,37 @@ export default function SubjectListPage() {
         setError(errorText(envelope.code, envelope.message));
         return;
       }
-      setItems(envelope.data.items);
+
+      const nextItems = envelope.data.items;
+      setItems(nextItems);
       setTotal(envelope.data.total);
+
+      try {
+        const responses = await Promise.all(
+          nextItems.map((item) =>
+            getSessions({
+              subject_id: item.subject_id,
+              page: 1,
+              page_size: 100,
+            }),
+          ),
+        );
+        const nextSessions: AdminSessionItem[] = [];
+        responses.forEach((response) => {
+          if (response.code !== 0 || response.data === null) {
+            throw new ApiError(response);
+          }
+          nextSessions.push(...response.data.items);
+        });
+        setSessionItems(nextSessions);
+      } catch (err) {
+        setSessionItems([]);
+        setRecentError(
+          err instanceof ApiError
+            ? errorText(err.code, err.message)
+            : "最近签到与汇报时间加载失败，请重试。",
+        );
+      }
     } catch (err) {
       setItems([]);
       setTotal(0);
@@ -66,7 +99,7 @@ export default function SubjectListPage() {
     <section>
       <PageTitle
         title="对象列表"
-        description="按编号或姓名检索，查看当前色码与依据入口、待复核数量与最近采集时间。"
+        description="按编号或姓名检索，查看当前色码与依据、待复核数量及最近签到/汇报时间。"
       />
 
       <form
@@ -106,6 +139,13 @@ export default function SubjectListPage() {
 
       <p className={styles.meta}>共 {total} 条</p>
 
+      {recentError ? (
+        <ErrorBanner
+          message={`最近签到/汇报时间：${recentError}`}
+          onRetry={() => void loadSubjects()}
+        />
+      ) : null}
+
       {loading ? <LoadingState text="正在加载对象列表…" /> : null}
 
       {!loading && error ? (
@@ -116,7 +156,13 @@ export default function SubjectListPage() {
         <EmptyState text="没有符合筛选条件的对象。" />
       ) : null}
 
-      {!loading && !error && items.length > 0 ? <SubjectTable items={items} /> : null}
+      {!loading && !error && items.length > 0 ? (
+        <SubjectTable
+          items={items}
+          sessions={sessionItems}
+          recentUnavailable={recentError !== null}
+        />
+      ) : null}
     </section>
   );
 }

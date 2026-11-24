@@ -43,11 +43,6 @@
   font-size: 12px;
 }
 
-.statusValue {
-  font-size: 15px;
-  font-weight: 600;
-}
-
 .statusGranted {
   font-size: 15px;
   font-weight: 600;
@@ -154,31 +149,6 @@
 .checkboxText span {
   color: var(--color-text-muted);
   font-size: 12px;
-}
-
-.fieldRow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.fieldLabel {
-  font-weight: 600;
-}
-
-.input {
-  width: 120px;
-  padding: var(--space-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-family: inherit;
-  font-size: inherit;
-}
-
-.input:focus {
-  outline: 2px solid var(--color-primary-weak);
-  border-color: var(--color-primary);
 }
 
 /* ---------- 反馈与按钮 ---------- */

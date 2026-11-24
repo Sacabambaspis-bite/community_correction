@@ -129,16 +129,11 @@ export default function ConsentPage() {
     }
   }, []);
 
-  const retentionText =
-    consent && consent.retention_days !== null
-      ? `${consent.retention_days} 天`
-      : "未设置";
-
   return (
     <main className={styles.page}>
       <PageTitle
         title="知情同意"
-        description="开始使用前，请了解本次采集的范围、用途、保存期限以及撤回方式。"
+        description="开始使用前，请了解本次采集的范围、用途以及撤回方式。"
       />
 
       {loading ? <LoadingState text="正在获取同意状态…" /> : null}
@@ -155,13 +150,6 @@ export default function ConsentPage() {
               <ConsentStatusItem label="整体同意" item={consent.general} />
               <ConsentStatusItem label="面部图像" item={consent.face} />
               <ConsentStatusItem label="语音" item={consent.audio} />
-              <div className={styles.statusItem}>
-                <span className={styles.statusLabel}>保存期限</span>
-                <span className={styles.statusValue}>{retentionText}</span>
-                <span className={styles.statusMeta}>
-                  {consent.revoked_at ? "已撤回" : "按约定到期处理"}
-                </span>
-              </div>
             </div>
             {consent.revoked_at ? (
               <p className={styles.revokeTime}>
@@ -184,14 +172,6 @@ export default function ConsentPage() {
                 </dd>
               </div>
               <div className={styles.infoRow}>
-                <dt>保存期限</dt>
-                <dd>
-                  {consent.retention_days !== null
-                    ? `${consent.retention_days} 天，到期后按约定处理。`
-                    : "未设置；提交同意时需填写保存期限，默认 180 天。"}
-                </dd>
-              </div>
-              <div className={styles.infoRow}>
                 <dt>撤回方式</dt>
                 <dd>
                   在本页点击「撤回同意」，或联系你所在司法所的工作人员协助撤回。
@@ -200,8 +180,7 @@ export default function ConsentPage() {
               <div className={styles.infoRow}>
                 <dt>撤回后的影响</dt>
                 <dd>
-                  撤回后无法继续发起新的采集；已保存的记录仍按原保存期限处理。
-                  如需提前删除记录，请联系工作人员。
+                  撤回后无法继续发起新的采集。如需处理已保存的记录，请联系工作人员。
                 </dd>
               </div>
             </dl>
@@ -224,7 +203,6 @@ export default function ConsentPage() {
               </div>
             ) : (
               <ConsentForm
-                retentionDays={consent.retention_days}
                 submitting={submitting}
                 error={formError}
                 onSubmit={(value) => void handleSubmit(value)}
@@ -235,8 +213,7 @@ export default function ConsentPage() {
           <section className={styles.card}>
             <h2 className={styles.cardTitle}>撤回同意</h2>
             <p className={styles.hint}>
-              撤回后无法继续发起新的采集，已保存的记录仍按原保存期限处理。
-              之后如需再次采集，需要重新提交同意。
+              撤回后无法继续发起新的采集。之后如需再次采集，需要重新提交同意。
             </p>
             {confirmingRevoke ? (
               <div className={styles.revokeBox}>

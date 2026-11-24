@@ -1,0 +1,28 @@
+.wrap {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  background: var(--overdue-color);
+  color: var(--color-surface);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.source {
+  color: var(--overdue-color);
+  font-size: 12px;
+}
+
+.link {
+  font-size: 12px;
+  white-space: nowrap;
+}

@@ -12,6 +12,7 @@ import {
 import { COLOR_META, COLOR_ORDER } from "../../lib/colors";
 import { errorText } from "../../lib/errorMessages";
 import { ApiError } from "../../lib/http";
+import { OverdueBadge } from "../OverdueBadge";
 import { TrendStrip } from "./TrendStrip";
 import styles from "./Dashboard.module.css";
 
@@ -97,14 +98,21 @@ export default function DashboardPage() {
                   );
                 })}
               </div>
-              <p className={styles.cardNote}>对象编号 {data.subject_id}</p>
+              <p className={styles.cardNote}>
+                对象编号 <Link to={`/admin/subjects/${data.subject_id}`}>{data.subject_id}</Link>
+              </p>
+              <div className={styles.subjectOverdue}>
+                <OverdueBadge subjectId={data.subject_id} overdue={data.overdue} />
+              </div>
             </section>
 
             <section className={styles.card}>
               <h2 className={styles.cardTitle}>待复核与最近采集</h2>
               <p className={styles.infoLine}>
                 待复核：
-                <Link to="/admin/tickets">{data.pending_tickets} 件</Link>
+                <Link to={`/admin/tickets?subject_id=${encodeURIComponent(data.subject_id)}`}>
+                  {data.pending_tickets} 件
+                </Link>
               </p>
               <p className={styles.infoLine}>最近采集：{lastSessionText || "—"}</p>
             </section>

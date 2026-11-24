@@ -2,6 +2,11 @@
 import type { AdminSessionItem } from "../../api/types";
 import styles from "./SubjectDetail.module.css";
 
+const SESSION_KIND_TEXT: Record<string, string> = {
+  checkin: "签到",
+  report: "思想汇报",
+};
+
 const SESSION_STATUS_TEXT: Record<string, string> = {
   created: "已创建",
   captured: "已完成",
@@ -54,6 +59,9 @@ export function SessionTimeline({ items }: { items: AdminSessionItem[] }) {
           <div className={styles.timelineMain}>
             <span className={styles.timelineTime}>{formatTime(item.captured_at) || "采集时间未记录"}</span>
             <span className={styles.timelineTags}>
+              <span className={styles.tag}>
+                类型：{SESSION_KIND_TEXT[item.kind] ?? "类型待补充"}
+              </span>
               <span className={styles.tag}>
                 会话：{statusText(SESSION_STATUS_TEXT, item.status)}
               </span>

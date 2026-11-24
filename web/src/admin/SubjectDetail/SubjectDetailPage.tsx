@@ -1,11 +1,15 @@
-/* 对象详情页（ui@1.2 §4.2）。
- * GET /api/admin/subjects/{id} 与 reviews 查询尚未实现（api@1.5 §5.4），
- * 基础信息回退到对象列表数据查找，当前结果只给占位说明，不编造色码。
+/* 对象详情页（ui@1.2 §4.2）：对象摘要、双模块频率与最近完成时间。
+ * 当前复盘列表仍无查询端点，因此当前结果保留占位，不编造色码。
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { getSessions, getSubjects } from "../../api/admin";
-import type { AdminSessionItem, SubjectListItem } from "../../api/types";
+import { getSessions, getSubject, updateFrequency } from "../../api/admin";
+import type {
+  AdminSessionItem,
+  SessionKind,
+  SubjectDetail,
+} from "../../api/types";
+import { OverdueBadge } from "../OverdueBadge";
 import { SensitivePanel } from "../../components/common/SensitivePanel";
 import {
   EmptyState,
@@ -35,10 +39,41 @@ function sortByCapturedAtDesc(items: AdminSessionItem[]): AdminSessionItem[] {
   });
 }
 
+function formatTime(value: string | null): string {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function latestCapturedAt(
+  items: AdminSessionItem[],
+  kind: SessionKind,
+): string | null {
+  const latest = items.find(
+    (item) =>
+      item.kind === kind &&
+      item.status === "captured" &&
+      item.captured_at !== null,
+  );
+  return latest?.captured_at ?? null;
+}
+
+function parseInterval(value: string): number | null {
+  if (!/^[1-9]\d*$/.test(value)) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
 export default function SubjectDetailPage() {
   const { subjectId } = useParams<{ subjectId: string }>();
 
-  const [subject, setSubject] = useState<SubjectListItem | null>(null);
+  const [subject, setSubject] = useState<SubjectDetail | null>(null);
   const [subjectLoading, setSubjectLoading] = useState(true);
   const [subjectError, setSubjectError] = useState<string | null>(null);
 
@@ -47,6 +82,11 @@ export default function SubjectDetailPage() {
   const [sessionsError, setSessionsError] = useState<string | null>(null);
 
   const [auditHint, setAuditHint] = useState<string | null>(null);
+  const [checkinInterval, setCheckinInterval] = useState("1");
+  const [reportInterval, setReportInterval] = useState("3");
+  const [frequencySaving, setFrequencySaving] = useState(false);
+  const [frequencyError, setFrequencyError] = useState<string | null>(null);
+  const [frequencyMessage, setFrequencyMessage] = useState<string | null>(null);
 
   const loadSubject = useCallback(async () => {
     if (!subjectId) {
@@ -57,15 +97,19 @@ export default function SubjectDetailPage() {
     }
     setSubjectLoading(true);
     setSubjectError(null);
+    setFrequencyError(null);
+    setFrequencyMessage(null);
     try {
-      const envelope = await getSubjects({ page: 1, page_size: 100 });
+      const envelope = await getSubject(subjectId);
       if (envelope.code !== 0 || envelope.data === null) {
         setSubject(null);
         setSubjectError(errorText(envelope.code, envelope.message));
         return;
       }
-      const found = envelope.data.items.find((item) => item.subject_id === subjectId) ?? null;
-      setSubject(found);
+      const data = envelope.data;
+      setSubject(data);
+      setCheckinInterval(String(data.checkin_interval_days ?? 1));
+      setReportInterval(String(data.report_interval_days ?? 3));
     } catch (err) {
       setSubject(null);
       setSubjectError(
@@ -114,11 +158,78 @@ export default function SubjectDetailPage() {
     void loadSessions();
   }, [loadSessions]);
 
+  const saveFrequency = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!subject) {
+      return;
+    }
+    const checkin = parseInterval(checkinInterval);
+    const report = parseInterval(reportInterval);
+    if (checkin === null || report === null) {
+      setFrequencyError("签到与汇报间隔均须填写为不小于 1 的整数。");
+      setFrequencyMessage(null);
+      return;
+    }
+
+    setFrequencySaving(true);
+    setFrequencyError(null);
+    setFrequencyMessage(null);
+    try {
+      const envelope = await updateFrequency(subject.subject_id, {
+        checkin_interval_days: checkin,
+        report_interval_days: report,
+      });
+      if (envelope.code !== 0 || envelope.data === null) {
+        setFrequencyError(errorText(envelope.code, envelope.message));
+        return;
+      }
+      const saved = envelope.data;
+      setSubject((current) => (current ? { ...current, ...saved } : current));
+      setCheckinInterval(String(saved.checkin_interval_days));
+      setReportInterval(String(saved.report_interval_days));
+      setFrequencyMessage("频率配置已保存。");
+
+      try {
+        const refreshed = await getSubject(subject.subject_id);
+        if (refreshed.code === 0 && refreshed.data !== null) {
+          setSubject({
+            ...refreshed.data,
+            checkin_interval_days: saved.checkin_interval_days,
+            report_interval_days: saved.report_interval_days,
+          });
+        } else {
+          setFrequencyMessage("频率已保存；逾期状态暂未刷新，请稍后重试。");
+        }
+      } catch {
+        setFrequencyMessage("频率已保存；逾期状态暂未刷新，请稍后重试。");
+      }
+    } catch (err) {
+      setFrequencyMessage(null);
+      setFrequencyError(
+        err instanceof ApiError
+          ? errorText(err.code, err.message)
+          : "网络异常，频率配置未保存，请重试。",
+      );
+    } finally {
+      setFrequencySaving(false);
+    }
+  };
+
+  const recentText = (kind: SessionKind): string => {
+    if (sessionsLoading) {
+      return "正在加载…";
+    }
+    if (sessionsError) {
+      return "暂不可用";
+    }
+    return formatTime(latestCapturedAt(sessions, kind)) || "尚未完成";
+  };
+
   return (
     <section>
       <PageTitle
         title="对象详情"
-        description="基础信息、当前结果、会话时间线与敏感内容折叠查看。"
+        description="基础信息、双模块频率、最近完成时间、会话时间线与敏感内容。"
         extra={<Link to="/admin/subjects">返回对象列表</Link>}
       />
 
@@ -129,7 +240,7 @@ export default function SubjectDetailPage() {
           <ErrorBanner message={subjectError} onRetry={() => void loadSubject()} />
         ) : null}
         {!subjectLoading && !subjectError && !subject ? (
-          <EmptyState text="对象不存在或接口未实现（对象详情接口尚未落地，已回退到列表数据查找）。" />
+          <EmptyState text="对象不存在。" />
         ) : null}
         {!subjectLoading && !subjectError && subject ? (
           <div className={styles.infoGrid}>
@@ -150,11 +261,92 @@ export default function SubjectDetailPage() {
             <div className={styles.infoItem}>
               <span className={styles.infoLabel}>同意状态</span>
               <span className={styles.infoValue}>
-                未接入（对象详情接口未实现，api@1.5 §5.4）
+                对象摘要未返回同意状态
               </span>
             </div>
           </div>
         ) : null}
+      </section>
+
+      <section className={styles.section}>
+        <h2 className={styles.sectionTitle}>频率配置</h2>
+        {subject ? (
+          <>
+            <div className={styles.overdueRow}>
+              <OverdueBadge subjectId={subject.subject_id} overdue={subject.overdue} />
+            </div>
+            {subject.checkin_interval_days == null ||
+            subject.report_interval_days == null ? (
+              <p className={styles.notice}>
+                接口未返回频率初值，当前按默认值 1 天 / 3 天显示，保存前请确认。
+              </p>
+            ) : null}
+            <form className={styles.frequencyForm} onSubmit={saveFrequency}>
+              <div className={styles.frequencyField}>
+                <label className={styles.filterField}>
+                  <span className={styles.filterLabel}>签到间隔（天）</span>
+                  <input
+                    className={styles.input}
+                    type="number"
+                    min={1}
+                    step={1}
+                    required
+                    value={checkinInterval}
+                    disabled={frequencySaving}
+                    onChange={(event) => setCheckinInterval(event.target.value)}
+                  />
+                </label>
+                <p className={styles.lastCompletion}>
+                  最近签到：{recentText("checkin")}
+                </p>
+              </div>
+              <div className={styles.frequencyField}>
+                <label className={styles.filterField}>
+                  <span className={styles.filterLabel}>汇报间隔（天）</span>
+                  <input
+                    className={styles.input}
+                    type="number"
+                    min={1}
+                    step={1}
+                    required
+                    value={reportInterval}
+                    disabled={frequencySaving}
+                    onChange={(event) => setReportInterval(event.target.value)}
+                  />
+                </label>
+                <p className={styles.lastCompletion}>
+                  最近汇报：{recentText("report")}
+                </p>
+              </div>
+              <button
+                className={`${styles.button} ${styles.saveButton}`}
+                type="submit"
+                disabled={frequencySaving}
+              >
+                {frequencySaving ? "保存中…" : "保存频率"}
+              </button>
+            </form>
+            {!sessionsLoading &&
+            !sessionsError &&
+            sessions.some((item) => item.kind === undefined) ? (
+              <p className={styles.notice}>
+                会话接口未返回类型，最近签到/汇报时间可能不完整。
+              </p>
+            ) : null}
+            {frequencyError ? (
+              <p className={styles.errorText} role="alert">
+                {frequencyError}
+              </p>
+            ) : null}
+            {frequencyMessage ? (
+              <p className={styles.successText} role="status">
+                {frequencyMessage}
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <p className={styles.notice}>对象信息加载成功后可配置频率。</p>
+        )}
       </section>
 
       <section className={styles.section}>
