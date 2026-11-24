@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+import re
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -18,15 +19,32 @@ from app.api.errors import (
     INTERNAL_ERROR,
     INVALID_REQUEST,
     NOT_FOUND,
+    STATE_CONFLICT,
     BizError,
     current_request_id,
     envelope,
 )
+from app.api.integration import (
+    compute_and_persist_review,
+    load_usable_sessions,
+    now_iso,
+    serialize_review,
+    serialize_ticket_detail,
+    serialize_ticket_list_item,
+)
 from app.api.schemas import (
+    DashboardOut,
+    ReviewCreateRequest,
     SessionListItem,
     SessionListOut,
     SubjectListItem,
     SubjectListOut,
+    TicketDetailOut,
+    TicketListItemOut,
+    TicketListOut,
+    TicketTransitionOut,
+    TicketTransitionRequest,
+    TrendPointOut,
 )
 from app.capture.config import STORAGE_ROOT
 from app.db.models import AuditLog, CaptureSession, Review, ReviewTicket, Subject
@@ -37,6 +55,10 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 _SUBJECT_STATUSES = frozenset({"active", "suspended", "closed"})
 _SESSION_STATUSES = frozenset({"created", "captured", "failed"})
+_TICKET_STATUSES = frozenset({"pending", "confirmed", "corrected", "closed"})
+_PRIORITIES = frozenset({"P0", "P1", "P2"})
+_COLORS = ("green", "blue", "yellow", "orange", "red")
+_WINDOW_END_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _now() -> str:
@@ -210,3 +232,375 @@ def get_session_face(
         raise BizError(INTERNAL_ERROR, "audit_write_failed")
 
     return FileResponse(target, media_type="image/jpeg")
+
+
+# ---- 复盘（api.md §7.9 / §7.14）----
+
+
+def _parse_window_end(value: Optional[str]) -> date:
+    """`window_end` 必须是严格 `YYYY-MM-DD`；缺省取本地今天。"""
+    if value is None:
+        return datetime.now().astimezone().date()
+    if not _WINDOW_END_PATTERN.match(value):
+        raise BizError(INVALID_REQUEST, "invalid_request")
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise BizError(INVALID_REQUEST, "invalid_request") from None
+
+
+@router.post("/reviews")
+def create_review(
+    payload: ReviewCreateRequest,
+    _role: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    subject = db.get(Subject, payload.subject_id)
+    if subject is None:
+        raise BizError(NOT_FOUND, "not_found")
+
+    end_date = _parse_window_end(payload.window_end)
+    start_date = end_date - timedelta(days=payload.window_days - 1)
+    window_start = start_date.isoformat()
+    window_end = end_date.isoformat()
+
+    usable = load_usable_sessions(db, subject.id, window_start, window_end)
+    if not usable:
+        raise BizError(STATE_CONFLICT, "no_session_in_window")
+
+    source = usable[-1]
+    now = now_iso()
+    review, _ticket, _created = compute_and_persist_review(
+        db,
+        subject,
+        source,
+        window_start,
+        window_end,
+        payload.window_days,
+        now,
+    )
+    db.add(
+        AuditLog(
+            actor_type="staff",
+            actor_id=None,
+            action="review.create",
+            target_type="review",
+            target_id=review.id,
+            detail_json=json.dumps({}),
+            request_id=current_request_id(),
+            created_at=now,
+        )
+    )
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    return envelope(data=serialize_review(review))
+
+
+@router.get("/reviews/{review_id}")
+def get_review(
+    review_id: str,
+    _role: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    review = db.get(Review, review_id)
+    if review is None:
+        raise BizError(NOT_FOUND, "not_found")
+    return envelope(data=serialize_review(review))
+
+
+# ---- 工单（api.md §7.10 / §7.12 / §7.13）----
+
+
+def _load_json_obj(raw: Optional[str]) -> dict:
+    try:
+        value = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+@router.get("/tickets")
+def list_tickets(
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
+    subject_id: Optional[str] = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    _role: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    if status is not None and status not in _TICKET_STATUSES:
+        raise BizError(INVALID_REQUEST, "invalid_request")
+    if priority is not None and priority not in _PRIORITIES:
+        raise BizError(INVALID_REQUEST, "invalid_request")
+
+    conditions = []
+    if status is not None:
+        conditions.append(ReviewTicket.status == status)
+    if priority is not None:
+        conditions.append(ReviewTicket.priority == priority)
+    if subject_id is not None:
+        conditions.append(ReviewTicket.subject_id == subject_id)
+
+    count_stmt = select(func.count()).select_from(ReviewTicket)
+    list_stmt = (
+        select(ReviewTicket, Review, Subject)
+        .join(Review, ReviewTicket.review_id == Review.id)
+        .join(Subject, ReviewTicket.subject_id == Subject.id)
+    )
+    for condition in conditions:
+        count_stmt = count_stmt.where(condition)
+        list_stmt = list_stmt.where(condition)
+
+    total = db.scalar(count_stmt) or 0
+    rows = db.execute(
+        list_stmt.order_by(
+            ReviewTicket.priority.asc(), ReviewTicket.opened_at.desc()
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+
+    items = [
+        TicketListItemOut(
+            **serialize_ticket_list_item(ticket, review, subject)
+        )
+        for ticket, review, subject in rows
+    ]
+    return envelope(
+        data=TicketListOut(
+            items=items, page=page, page_size=page_size, total=total
+        ).model_dump()
+    )
+
+
+def _ticket_history(db: Session, ticket: ReviewTicket) -> list[dict]:
+    """建单记录 + 流转留痕，按时间升序。"""
+    history = [
+        {
+            "action": "opened",
+            "actor": "system",
+            "note": None,
+            "at": ticket.opened_at,
+        }
+    ]
+    logs = db.scalars(
+        select(AuditLog)
+        .where(
+            AuditLog.action == "ticket.transition",
+            AuditLog.target_type == "ticket",
+            AuditLog.target_id == ticket.id,
+        )
+        .order_by(AuditLog.created_at.asc(), AuditLog.id.asc())
+    ).all()
+    for log in logs:
+        detail = _load_json_obj(log.detail_json)
+        history.append(
+            {
+                "action": detail.get("action") or "unknown",
+                "actor": log.actor_id or "staff",
+                "note": detail.get("note"),
+                "at": log.created_at,
+            }
+        )
+    return history
+
+
+@router.get("/tickets/{ticket_id}")
+def get_ticket(
+    ticket_id: str,
+    _role: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    ticket = db.get(ReviewTicket, ticket_id)
+    if ticket is None:
+        raise BizError(NOT_FOUND, "not_found")
+
+    review = db.get(Review, ticket.review_id)
+    subject = db.get(Subject, ticket.subject_id)
+
+    now = now_iso()
+    db.add(
+        AuditLog(
+            actor_type="staff",
+            actor_id=None,
+            action="sensitive.view",
+            target_type="ticket",
+            target_id=ticket.id,
+            detail_json=json.dumps({"field": "ticket"}),
+            request_id=current_request_id(),
+            created_at=now,
+        )
+    )
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise BizError(INTERNAL_ERROR, "audit_write_failed")
+
+    history = _ticket_history(db, ticket)
+    return envelope(
+        data=TicketDetailOut(
+            **serialize_ticket_detail(ticket, review, subject, history)
+        ).model_dump()
+    )
+
+
+@router.post("/tickets/{ticket_id}/transition")
+def transition_ticket(
+    ticket_id: str,
+    payload: TicketTransitionRequest,
+    _role: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    ticket = db.get(ReviewTicket, ticket_id)
+    if ticket is None:
+        raise BizError(NOT_FOUND, "not_found")
+    if ticket.status == "closed":
+        raise BizError(STATE_CONFLICT, "ticket_closed")
+
+    note = payload.note.strip() if isinstance(payload.note, str) else ""
+    note = note or None
+
+    if payload.action == "correct":
+        if payload.conclusion_color not in _COLORS or note is None:
+            raise BizError(INVALID_REQUEST, "invalid_request")
+    elif payload.action == "close":
+        if note is None:
+            raise BizError(INVALID_REQUEST, "invalid_request")
+
+    previous_status = ticket.status
+    now = now_iso()
+    ticket.status = "closed"
+    ticket.closed_at = now
+    if payload.conclusion_color is not None:
+        ticket.conclusion_color = payload.conclusion_color
+    if note is not None:
+        ticket.conclusion_note = note
+    if payload.assignee is not None:
+        ticket.assignee = payload.assignee
+
+    db.add(
+        AuditLog(
+            actor_type="staff",
+            actor_id=payload.assignee,
+            action="ticket.transition",
+            target_type="ticket",
+            target_id=ticket.id,
+            detail_json=json.dumps(
+                {
+                    "action": payload.action,
+                    "previous_status": previous_status,
+                    "conclusion_color": ticket.conclusion_color,
+                    "note": ticket.conclusion_note,
+                },
+                ensure_ascii=False,
+            ),
+            request_id=current_request_id(),
+            created_at=now,
+        )
+    )
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    return envelope(
+        data=TicketTransitionOut(
+            ticket_id=ticket.id,
+            status=ticket.status,
+            previous_status=previous_status,
+            action=payload.action,
+            conclusion_color=ticket.conclusion_color,
+            conclusion_note=ticket.conclusion_note,
+            assignee=ticket.assignee,
+            closed_at=ticket.closed_at,
+        ).model_dump()
+    )
+
+
+# ---- 看板（api.md §7.11）----
+
+
+def _review_date(review: Review) -> Optional[date]:
+    try:
+        return datetime.fromisoformat(review.created_at).date()
+    except (TypeError, ValueError):
+        return None
+
+
+@router.get("/dashboard")
+def dashboard(
+    subject_id: Optional[str] = None,
+    _role: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    if subject_id is None:
+        latest = db.scalars(
+            select(CaptureSession)
+            .where(CaptureSession.status == "captured")
+            .order_by(desc(CaptureSession.captured_at))
+            .limit(1)
+        ).first()
+        if latest is None:
+            raise BizError(NOT_FOUND, "not_found")
+        subject = db.get(Subject, latest.subject_id)
+    else:
+        subject = db.get(Subject, subject_id)
+    if subject is None:
+        raise BizError(NOT_FOUND, "not_found")
+
+    reviews = db.scalars(
+        select(Review).where(Review.subject_id == subject.id)
+    ).all()
+
+    distribution = {color: 0 for color in _COLORS}
+    for review in reviews:
+        if review.final_color in distribution:
+            distribution[review.final_color] += 1
+
+    today = datetime.now().astimezone().date()
+    cutoff = today - timedelta(days=6)
+    latest_by_date: dict[date, Review] = {}
+    for review in reviews:
+        review_date = _review_date(review)
+        if review_date is None or review_date < cutoff or review_date > today:
+            continue
+        current = latest_by_date.get(review_date)
+        if current is None or review.created_at > current.created_at:
+            latest_by_date[review_date] = review
+
+    trend = [
+        TrendPointOut(date=day.isoformat(), color=latest_by_date[day].final_color)
+        for day in sorted(latest_by_date)
+    ]
+
+    pending_tickets = db.scalar(
+        select(func.count())
+        .select_from(ReviewTicket)
+        .where(
+            ReviewTicket.subject_id == subject.id,
+            ReviewTicket.status == "pending",
+        )
+    ) or 0
+    last_session_at = db.scalar(
+        select(func.max(CaptureSession.captured_at)).where(
+            CaptureSession.subject_id == subject.id,
+            CaptureSession.status == "captured",
+        )
+    )
+
+    return envelope(
+        data=DashboardOut(
+            subject_id=subject.id,
+            color_distribution=distribution,
+            trend_7d=trend,
+            pending_tickets=pending_tickets,
+            last_session_at=last_session_at,
+        ).model_dump()
+    )

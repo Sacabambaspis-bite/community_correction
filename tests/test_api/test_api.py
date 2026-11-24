@@ -218,8 +218,11 @@ def test_analyze_endpoint_state_mapping(client, db_factory, admin_headers):
     captured = client.post(
         f"/api/sessions/{captured_id}/analyze", headers=admin_headers
     )
-    assert captured.json()["code"] == 5000
-    assert captured.json()["message"] == "analysis_pipeline_not_ready"
+    body = captured.json()
+    assert body["code"] == 2003
+    assert body["message"] == "analysis_failed"
+    assert body["data"]["analysis_status"] == "failed"
+    assert body["data"]["status"] == "captured"
 
 
 def test_docs_available(client):

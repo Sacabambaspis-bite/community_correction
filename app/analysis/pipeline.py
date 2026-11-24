@@ -21,15 +21,21 @@ from app.analysis.paths import (
 )
 from app.analysis.providers import BaseProvider, build_mock_providers, get_scenario
 from app.analysis.schema import validate_channel, validate_result
+from app.grading.config import map_risk_level
 
 _CHANNEL_NAMES = ("asr", "emotion", "face", "psych")
 _PROVIDER_RESULT_KEYS = {"status", "output", "confidence", "latency_ms", "reason"}
 
 
-def generate_overall_risk_level() -> str:
-    """风险档位占位；当前值故意不伪装成 Schema 合法风险结论。"""
-    # TODO: 等待契约补充
-    return "pending"
+def generate_overall_risk_level(
+    text_valence: float, intent_flag: str = "none"
+) -> str:
+    """把文本极性与意图标记映射为 Schema 内的五档 ``overall.risk_level``。
+
+    阈值与覆写规则唯一来源是 ``app.grading.config.map_risk_level``，本模块不
+    复制分段阈值。``intent_flag`` 指向明确意图时强制 ``crisis``。
+    """
+    return map_risk_level(text_valence, intent_flag)
 
 
 def _failed(error: str) -> AnalysisRunResult:
@@ -268,7 +274,7 @@ def run_analysis(
     *,
     scenario: str | None = None,
     providers: dict[str, BaseProvider] | None = None,
-    overall_risk_level_generator: Callable[[], str] | None = None,
+    overall_risk_level_generator: Callable[[float, str], str] | None = None,
     result_validator: Callable[[dict[str, Any]], None] = validate_result,
     clock: Callable[[], datetime] | None = None,
     monotonic: Callable[[], float] | None = None,
@@ -365,10 +371,13 @@ def run_analysis(
         needs_review = consistency == "low" or degraded
         risk_generator = overall_risk_level_generator or generate_overall_risk_level
         psych_output = channels["psych"]["output"] if psych_available else None
+        intent_flag = (
+            psych_output.get("intent_flag") if psych_available else "none"
+        )
         overall = {
             "text_valence": text_valence,
             "text_signal": psych_output["signal_strength"] if psych_output else 0.0,
-            "risk_level": risk_generator(),
+            "risk_level": risk_generator(text_valence, intent_flag),
             "summary_signal": _summary(
                 scenario_data,
                 channels,

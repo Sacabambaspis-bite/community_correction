@@ -63,7 +63,7 @@ def run_pipeline():
         ticks = iter((100.0, 100.085))
         options = {
             "scenario": "normal",
-            "overall_risk_level_generator": lambda: "watch",
+            "overall_risk_level_generator": lambda *_: "watch",
             "clock": lambda: FIXED_NOW,
             "monotonic": lambda: next(ticks),
         }

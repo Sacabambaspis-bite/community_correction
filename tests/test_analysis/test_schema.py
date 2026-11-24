@@ -26,8 +26,14 @@ def test_contract_example_passes_real_schema_validation():
     validate_result(_example())
 
 
-def test_overall_risk_level_remains_an_explicit_pending_placeholder():
-    assert generate_overall_risk_level() == "pending"
+def test_overall_risk_level_maps_to_legal_enum_values():
+    assert generate_overall_risk_level(0.1) == "none"
+    assert generate_overall_risk_level(-0.1) == "watch"
+    assert generate_overall_risk_level(-0.3) == "elevated"
+    assert generate_overall_risk_level(-0.6) == "high"
+    assert generate_overall_risk_level(-0.9) == "crisis"
+    # 明确意图强制最高档，不受文本极性影响。
+    assert generate_overall_risk_level(0.5, "suicide_intent") == "crisis"
 
 
 @pytest.mark.parametrize(

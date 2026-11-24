@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from app.analysis.errors import AnalysisSchemaError
-from app.analysis.pipeline import generate_overall_risk_level
 from app.analysis.providers import build_mock_providers
 from app.analysis.schema import validate_result
 
@@ -86,7 +85,7 @@ def test_four_mock_scenarios(
     run = run_pipeline(
         analysis_input,
         scenario=scenario,
-        overall_risk_level_generator=lambda: "watch",
+        overall_risk_level_generator=lambda *_: "watch",
     )
     _assert_valid_run(run, "done")
     assert run.result["consistency"] == expected_consistency
@@ -295,12 +294,12 @@ def test_final_schema_failure_returns_failed_wrapper(analysis_input, run_pipelin
     assert run.error == "schema_validation_failed:test"
 
 
-def test_pending_risk_placeholder_is_not_silently_accepted(
+def test_invalid_risk_level_is_not_silently_accepted(
     analysis_input, run_pipeline
 ):
     run = run_pipeline(
         analysis_input,
-        overall_risk_level_generator=generate_overall_risk_level,
+        overall_risk_level_generator=lambda *_: "pending",
     )
     assert run.analysis_status == "failed"
     assert run.result is None

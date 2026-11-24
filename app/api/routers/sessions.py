@@ -21,6 +21,13 @@ from app.api.deps import (
     require_admin,
     require_any_subject_or_staff,
 )
+from app.api.integration import (
+    compute_and_persist_review,
+    now_iso,
+    persist_analysis,
+    run_analysis_for_session,
+    window_bounds,
+)
 from app.api.routers.user import require_consent
 from app.api.errors import (
     ANALYSIS_FAILED,
@@ -29,6 +36,7 @@ from app.api.errors import (
     NOT_FOUND,
     SESSION_NOT_CAPTURED,
     BizError,
+    current_request_id,
     envelope,
 )
 from app.api.schemas import (
@@ -38,7 +46,7 @@ from app.api.schemas import (
     degraded_flags,
 )
 from app.capture.config import STORAGE_ROOT
-from app.db.models import CaptureSession, Subject
+from app.db.models import AuditLog, CaptureSession, Subject
 
 logger = logging.getLogger("app.api")
 
@@ -66,6 +74,25 @@ def _load_json_list(raw: Optional[str]) -> list[str]:
     except (TypeError, ValueError):
         return []
     return value if isinstance(value, list) else []
+
+
+def _session_payload(session: CaptureSession) -> dict:
+    """会话摘要（api.md §7.3 的 data 字段）。"""
+    return SessionOut(
+        session_id=session.id,
+        subject_id=session.subject_id,
+        status=session.status,
+        capture_status=session.capture_status,
+        coverage=session.coverage,
+        face_available=bool(session.face_path),
+        audio_available=bool(session.audio_path),
+        duration_sec=session.duration_sec,
+        captured_at=session.captured_at,
+        analysis_status=session.analysis_status,
+        codes=_load_json_list(session.codes),
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+    ).model_dump()
 
 
 def _capture_result(
@@ -218,21 +245,7 @@ def get_session(
     enforce_session_owner(session, _role, subject_id)
 
     degraded = degraded_flags(session.capture_status, session.analysis_status)
-    data = SessionOut(
-        session_id=session.id,
-        subject_id=session.subject_id,
-        status=session.status,
-        capture_status=session.capture_status,
-        coverage=session.coverage,
-        face_available=bool(session.face_path),
-        audio_available=bool(session.audio_path),
-        duration_sec=session.duration_sec,
-        captured_at=session.captured_at,
-        analysis_status=session.analysis_status,
-        codes=_load_json_list(session.codes),
-        created_at=session.created_at,
-        updated_at=session.updated_at,
-    ).model_dump()
+    data = _session_payload(session)
 
     if session.status == "failed":
         return envelope(
@@ -251,6 +264,22 @@ def get_session(
     return envelope(data=data, degraded=degraded)
 
 
+def _write_analyze_audit(db: Session, session_id: str, now: str) -> None:
+    """分析触发留痕；detail 为空对象，禁止写入路径、转写或异常原文。"""
+    db.add(
+        AuditLog(
+            actor_type="staff",
+            actor_id=None,
+            action="session.analyze",
+            target_type="session",
+            target_id=session_id,
+            detail_json=json.dumps({}),
+            request_id=current_request_id(),
+            created_at=now,
+        )
+    )
+
+
 @router.post("/sessions/{session_id}/analyze")
 def analyze_session(
     session_id: str,
@@ -260,8 +289,70 @@ def analyze_session(
     session = db.get(CaptureSession, session_id)
     if session is None:
         raise BizError(NOT_FOUND, "not_found")
+
+    now = now_iso()
     if session.status == "created":
+        _write_analyze_audit(db, session.id, now)
+        db.commit()
         raise BizError(SESSION_NOT_CAPTURED, "session_not_captured")
     if session.status == "failed":
+        _write_analyze_audit(db, session.id, now)
+        db.commit()
         raise BizError(CAPTURE_FAILED, "capture_failed")
-    raise BizError(INTERNAL_ERROR, "analysis_pipeline_not_ready")
+
+    degraded = degraded_flags(session.capture_status, session.analysis_status)
+    if session.analysis_status == "failed":
+        _write_analyze_audit(db, session.id, now)
+        db.commit()
+        return envelope(
+            code=ANALYSIS_FAILED,
+            message="analysis_failed",
+            data=_session_payload(session),
+            degraded=degraded,
+        )
+
+    reused = session.analysis_status in ("done", "degraded") and bool(
+        session.analysis_json
+    )
+    if not reused:
+        run = run_analysis_for_session(session)
+        if run.analysis_status == "failed":
+            persist_analysis(db, session, run, now)
+            _write_analyze_audit(db, session.id, now)
+            db.commit()
+            return envelope(
+                code=ANALYSIS_FAILED,
+                message="analysis_failed",
+                data=_session_payload(session),
+                degraded=degraded_flags(
+                    session.capture_status, session.analysis_status
+                ),
+            )
+        persist_analysis(db, session, run, now)
+
+    subject = db.get(Subject, session.subject_id)
+    if subject is None:
+        raise BizError(NOT_FOUND, "not_found")
+
+    window_start, window_end = window_bounds(session.captured_at, 7)
+    review, ticket, review_created = compute_and_persist_review(
+        db, subject, session, window_start, window_end, 7, now
+    )
+    _write_analyze_audit(db, session.id, now)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    data = {
+        "session_id": session.id,
+        "analysis_status": session.analysis_status,
+        "review_id": review.id,
+        "review_created": review_created,
+        "ticket_id": ticket.id if ticket is not None else None,
+    }
+    return envelope(
+        data=data,
+        degraded=degraded_flags(session.capture_status, session.analysis_status),
+    )
