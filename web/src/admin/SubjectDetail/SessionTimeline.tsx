@@ -1,6 +1,9 @@
-/* 会话时间线（ui@1.2 §4.2）：按 captured_at 倒序展示，空态有明确文案。 */
+/* 会话时间线（ui@1.2 §4.2）：按 captured_at 倒序展示，每页 5 条，空态有明确文案。 */
+import { useState } from "react";
 import type { AdminSessionItem } from "../../api/types";
 import styles from "./SubjectDetail.module.css";
+
+const PAGE_SIZE = 5;
 
 const SESSION_KIND_TEXT: Record<string, string> = {
   checkin: "签到",
@@ -48,34 +51,66 @@ function statusText(map: Record<string, string>, value: string | null): string {
 }
 
 export function SessionTimeline({ items }: { items: AdminSessionItem[] }) {
+  const [page, setPage] = useState(1);
+
   if (items.length === 0) {
     return <p className={styles.empty}>该对象暂无会话记录。</p>;
   }
 
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+  /* 数据量变化时按当前页收敛，避免停留在不存在的页码。 */
+  const currentPage = Math.min(page, totalPages);
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const visibleItems = items.slice(start, start + PAGE_SIZE);
+
   return (
-    <ol className={styles.timeline}>
-      {items.map((item) => (
-        <li key={item.session_id} className={styles.timelineItem}>
-          <div className={styles.timelineMain}>
-            <span className={styles.timelineTime}>{formatTime(item.captured_at) || "采集时间未记录"}</span>
-            <span className={styles.timelineTags}>
-              <span className={styles.tag}>
-                类型：{SESSION_KIND_TEXT[item.kind] ?? "类型待补充"}
+    <>
+      <ol className={styles.timeline}>
+        {visibleItems.map((item) => (
+          <li key={item.session_id} className={styles.timelineItem}>
+            <div className={styles.timelineMain}>
+              <span className={styles.timelineTime}>{formatTime(item.captured_at) || "采集时间未记录"}</span>
+              <span className={styles.timelineTags}>
+                <span className={styles.tag}>
+                  类型：{SESSION_KIND_TEXT[item.kind] ?? "类型待补充"}
+                </span>
+                <span className={styles.tag}>
+                  会话：{statusText(SESSION_STATUS_TEXT, item.status)}
+                </span>
+                <span className={styles.tag}>
+                  采集：{statusText(CAPTURE_STATUS_TEXT, item.capture_status)}
+                </span>
+                <span className={styles.tag}>
+                  分析：{statusText(ANALYSIS_STATUS_TEXT, item.analysis_status)}
+                </span>
               </span>
-              <span className={styles.tag}>
-                会话：{statusText(SESSION_STATUS_TEXT, item.status)}
-              </span>
-              <span className={styles.tag}>
-                采集：{statusText(CAPTURE_STATUS_TEXT, item.capture_status)}
-              </span>
-              <span className={styles.tag}>
-                分析：{statusText(ANALYSIS_STATUS_TEXT, item.analysis_status)}
-              </span>
-            </span>
-            <span className={styles.timelineHint}>会话编号 {item.session_id}</span>
-          </div>
-        </li>
-      ))}
-    </ol>
+            </div>
+          </li>
+        ))}
+      </ol>
+      <div className={styles.pagination}>
+        <span className={styles.pageInfo} aria-live="polite">
+          第 {currentPage} / {totalPages} 页
+        </span>
+        <span className={styles.pageActions}>
+          <button
+            type="button"
+            className={styles.pageButton}
+            onClick={() => setPage(currentPage - 1)}
+            disabled={currentPage <= 1}
+          >
+            上一页
+          </button>
+          <button
+            type="button"
+            className={styles.pageButton}
+            onClick={() => setPage(currentPage + 1)}
+            disabled={currentPage >= totalPages}
+          >
+            下一页
+          </button>
+        </span>
+      </div>
+    </>
   );
 }
