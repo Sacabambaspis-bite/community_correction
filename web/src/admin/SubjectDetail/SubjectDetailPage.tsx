@@ -1,5 +1,5 @@
-/* 对象详情页（ui@1.2 §4.2）：基础信息、状态概览、打卡影像与思想汇报录音、
- * 双模块频率、会话时间线与敏感内容。
+/* 对象详情页（ui@1.3 §4.2）：基础信息、状态概览、打卡与思想汇报（含全部采集记录折叠区）、
+ * 双模块频率、当前结果。原独立「会话时间线」「敏感内容」栏目已分别并入与移除。
  * 独立状态看板（ui@1.2 §4.3）已合并到本页，不再提供单独路由。
  * 当前复盘列表仍无查询端点，因此当前结果保留占位，不编造色码。
  */
@@ -14,9 +14,11 @@ import {
 } from "../../api/admin";
 import type {
   AdminSessionItem,
+  AnalysisStatus,
   CaptureStatus,
   DashboardData,
   Gender,
+  MediaEmotion,
   SessionKind,
   SubjectDetail,
   SubjectMediaData,
@@ -31,7 +33,7 @@ import {
 } from "../../components/common/StateViews";
 import { COLOR_META, COLOR_ORDER } from "../../lib/colors";
 import { errorText } from "../../lib/errorMessages";
-import { ApiError } from "../../lib/http";
+import { ApiError, fetchMediaBlob } from "../../lib/http";
 import { SessionTimeline } from "./SessionTimeline";
 import { SensevoiceSyncPanel } from "./SensevoiceSyncPanel";
 import { TrendStrip } from "./TrendStrip";
@@ -59,10 +61,21 @@ const CAPTURE_STATUS_TEXT: Record<CaptureStatus, string> = {
   error: "采集异常",
 };
 
-const AUDIT_HINT = "原型：展开动作待接入审计留痕接口";
-const MEDIA_AUDIT_HINT = "原型：调阅记录待接入审计留痕接口";
+const ANALYSIS_STATUS_TEXT: Record<AnalysisStatus, string> = {
+  pending: "待分析",
+  done: "已分析",
+  degraded: "降级可用",
+  failed: "分析失败",
+};
+
+const RECORD_KIND_TEXT: Record<SessionKind, string> = {
+  checkin: "刷脸签到",
+  report: "思想汇报",
+};
+
+const MEDIA_AUDIT_HINT = "本次查看已记录访问留痕：影像、录音与转写调阅会写入审计日志";
 const MEDIA_NOTICE =
-  "影像与音频为模拟演示数据（录音为合成提示音），接入真实接口前不得用于实际处置。";
+  "影像与录音均来自真实采集落盘，调阅会写入审计日志，请按权限使用。";
 
 function sortByCapturedAtDesc(items: AdminSessionItem[]): AdminSessionItem[] {
   return [...items].sort((left, right) => {
@@ -136,13 +149,15 @@ export default function SubjectDetailPage() {
 
   /* 按日期的打卡影像与思想汇报录音。 */
   const [media, setMedia] = useState<SubjectMediaData | null>(null);
+  const [recordIndex, setRecordIndex] = useState(0);
+  const [imageSrc, setImageSrc] = useState<string | null>(null);
+  const [audioSrc, setAudioSrc] = useState<string | null>(null);
   const [mediaDate, setMediaDate] = useState("");
   const [mediaLoading, setMediaLoading] = useState(true);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [imageFailed, setImageFailed] = useState(false);
   const [mediaAuditHint, setMediaAuditHint] = useState<string | null>(null);
 
-  const [auditHint, setAuditHint] = useState<string | null>(null);
   const [checkinInterval, setCheckinInterval] = useState("1");
   const [reportInterval, setReportInterval] = useState("3");
   const [frequencySaving, setFrequencySaving] = useState(false);
@@ -261,6 +276,8 @@ export default function SubjectDetailPage() {
         }
         setMedia(envelope.data);
         setMediaDate(envelope.data.date);
+        // 默认展示当日最近更新的记录（items 按时间升序，最后一条最新）。
+        setRecordIndex(Math.max(0, envelope.data.items.length - 1));
       } catch (err) {
         setMedia(null);
         setMediaError(
@@ -348,14 +365,6 @@ export default function SubjectDetailPage() {
     }
   };
 
-  const queryMedia = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!mediaDate) {
-      return;
-    }
-    void loadMedia(mediaDate);
-  };
-
   const recentText = (kind: SessionKind): string => {
     if (sessionsLoading) {
       return "正在加载…";
@@ -366,12 +375,84 @@ export default function SubjectDetailPage() {
     return formatTime(latestCapturedAt(sessions, kind)) || "尚未完成";
   };
 
-  const mediaItem = media?.item ?? null;
-  const checkin = mediaItem?.checkin ?? null;
-  const report = mediaItem?.report ?? null;
-  const mediaHasRecord =
-    mediaItem !== null && (checkin !== null || report !== null);
+  const mediaRecords = media?.items ?? [];
+  const mediaHasRecord = mediaRecords.length > 0;
+  const record = mediaRecords[recordIndex] ?? null;
   const availableDates = media?.available_dates ?? [];
+
+  /* 真实模式下的媒体 URL 需要鉴权，不能直接作为 src；先拉 blob 再转 object URL。
+   * mock 模式返回 data URI，走直接分支。 */
+  const checkinImageUrl = record?.image_url ?? null;
+  const reportAudioUrl = record?.audio_url ?? null;
+
+  useEffect(() => {
+    setImageSrc(null);
+    setImageFailed(false);
+    if (!checkinImageUrl) {
+      return;
+    }
+    if (isInlineUrl(checkinImageUrl)) {
+      setImageSrc(checkinImageUrl);
+      return;
+    }
+    let cancelled = false;
+    fetchMediaBlob(checkinImageUrl)
+      .then((blob) => {
+        if (!cancelled) {
+          setImageSrc(URL.createObjectURL(blob));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setImageFailed(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [checkinImageUrl]);
+
+  useEffect(() => {
+    setAudioSrc(null);
+    if (!reportAudioUrl) {
+      return;
+    }
+    if (isInlineUrl(reportAudioUrl)) {
+      setAudioSrc(reportAudioUrl);
+      return;
+    }
+    let cancelled = false;
+    fetchMediaBlob(reportAudioUrl)
+      .then((blob) => {
+        if (!cancelled) {
+          setAudioSrc(URL.createObjectURL(blob));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAudioSrc(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reportAudioUrl]);
+
+  // 释放上一份 blob URL，避免日期切换时累积。
+  useEffect(() => {
+    if (!imageSrc || !imageSrc.startsWith("blob:")) {
+      return;
+    }
+    return () => URL.revokeObjectURL(imageSrc);
+  }, [imageSrc]);
+
+  useEffect(() => {
+    if (!audioSrc || !audioSrc.startsWith("blob:")) {
+      return;
+    }
+    return () => URL.revokeObjectURL(audioSrc);
+  }, [audioSrc]);
+
   const dashboardLastSession = dashboard
     ? formatTime(dashboard.last_session_at)
     : "";
@@ -380,7 +461,7 @@ export default function SubjectDetailPage() {
     <section>
       <PageTitle
         title="对象详情"
-        description="基础信息、状态概览、打卡影像与思想汇报录音、频率配置、当前结果、心理状态趋势（并入状态概览）、会话时间线与敏感内容。"
+        description="基础信息、状态概览、打卡与思想汇报（含全部采集记录）、频率配置、当前结果与心理状态趋势。"
         extra={<Link to="/admin/subjects">返回对象列表</Link>}
       />
 
@@ -533,47 +614,17 @@ export default function SubjectDetailPage() {
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>打卡与思想汇报</h2>
         <p className={styles.notice}>
-          按日期查看打卡影像与思想汇报录音。影像与录音默认折叠，展开动作在原型阶段暂不落留痕。
+          按日期查看打卡影像、思想汇报录音与转写文本。影像与录音默认折叠，查看录音与转写会写入访问审计日志。
         </p>
-        <form className={styles.mediaForm} onSubmit={queryMedia}>
-          <label className={styles.filterField}>
-            <span className={styles.filterLabel}>日期</span>
-            <input
-              className={styles.input}
-              type="date"
-              value={mediaDate}
-              disabled={mediaLoading}
-              onChange={(event) => setMediaDate(event.target.value)}
-            />
-          </label>
-          <button
-            className={styles.button}
-            type="submit"
-            disabled={mediaLoading || !mediaDate}
-          >
-            查询
-          </button>
-        </form>
-        {availableDates.length > 0 ? (
-          <div className={styles.dateChips}>
-            <span className={styles.filterLabel}>可用日期：</span>
-            {availableDates.map((date) => (
-              <button
-                key={date}
-                type="button"
-                className={styles.dateChip}
-                aria-pressed={date === mediaDate}
-                disabled={mediaLoading}
-                onClick={() => {
-                  setMediaDate(date);
-                  void loadMedia(date);
-                }}
-              >
-                {date}
-              </button>
-            ))}
-          </div>
-        ) : null}
+        <MediaDatePicker
+          availableDates={availableDates}
+          value={mediaDate}
+          disabled={mediaLoading}
+          onChange={(date) => {
+            setMediaDate(date);
+            void loadMedia(date);
+          }}
+        />
 
         {mediaLoading ? <LoadingState text="正在加载打卡与汇报记录…" /> : null}
         {!mediaLoading && mediaError ? (
@@ -587,82 +638,140 @@ export default function SubjectDetailPage() {
         ) : null}
 
         {!mediaLoading && !mediaError && mediaHasRecord ? (
-          <div className={styles.mediaGrid}>
-            <div className={styles.mediaCard}>
-              <h3 className={styles.cardTitle}>打卡</h3>
-              {checkin ? (
-                <>
+          <>
+            <div className={styles.recordSwitcher}>
+              <span className={styles.recordCount}>
+                第 {recordIndex + 1} / {mediaRecords.length} 条
+              </span>
+              <button
+                type="button"
+                className={styles.pageButton}
+                onClick={() =>
+                  setRecordIndex((current) => Math.max(0, current - 1))
+                }
+                disabled={recordIndex <= 0}
+              >
+                上一条
+              </button>
+              <button
+                type="button"
+                className={styles.pageButton}
+                onClick={() =>
+                  setRecordIndex((current) =>
+                    Math.min(mediaRecords.length - 1, current + 1),
+                  )
+                }
+                disabled={recordIndex >= mediaRecords.length - 1}
+              >
+                下一条
+              </button>
+            </div>
+
+            {record ? (
+              <div className={styles.mediaGrid}>
+                <div className={styles.mediaCard}>
+                  <h3 className={styles.cardTitle}>
+                    {RECORD_KIND_TEXT[record.kind] ?? "采集记录"}
+                  </h3>
                   <p className={styles.mediaLine}>
-                    采集时间：{formatTime(checkin.captured_at) || "未记录"}
+                    采集时间：{formatTime(record.captured_at) || "未记录"}
                   </p>
                   <p className={styles.mediaLine}>
                     采集状态：
-                    {checkin.capture_status
-                      ? CAPTURE_STATUS_TEXT[checkin.capture_status]
+                    {record.capture_status
+                      ? CAPTURE_STATUS_TEXT[record.capture_status]
                       : "未记录"}
                   </p>
-                  {checkin.image_url ? (
+                  <p className={styles.mediaLine}>
+                    分析状态：
+                    {ANALYSIS_STATUS_TEXT[record.analysis_status] ??
+                      record.analysis_status}
+                  </p>
+                  {record.duration_sec !== null ? (
+                    <p className={styles.mediaLine}>
+                      时长：{record.duration_sec} 秒
+                    </p>
+                  ) : null}
+                  {record.image_url ? (
                     <SensitivePanel
-                      title="打卡影像"
+                      title="采集影像"
                       onExpand={() => setMediaAuditHint(MEDIA_AUDIT_HINT)}
                     >
                       {imageFailed ? (
                         <p className={styles.mediaEmpty}>
                           影像加载失败，可稍后重试
                         </p>
-                      ) : (
+                      ) : imageSrc ? (
                         <img
                           className={styles.mediaImage}
-                          src={checkin.image_url}
-                          alt="打卡影像"
+                          src={imageSrc}
+                          alt="采集影像"
                           loading="lazy"
                           onError={() => setImageFailed(true)}
                         />
+                      ) : (
+                        <p className={styles.mediaEmpty}>影像加载中…</p>
                       )}
                     </SensitivePanel>
                   ) : (
-                    <p className={styles.mediaEmpty}>该日无影像</p>
+                    <p className={styles.mediaEmpty}>该条记录无影像</p>
                   )}
-                </>
-              ) : (
-                <p className={styles.mediaEmpty}>该日无打卡记录</p>
-              )}
-            </div>
+                </div>
 
-            <div className={styles.mediaCard}>
-              <h3 className={styles.cardTitle}>思想汇报</h3>
-              {report ? (
-                <>
-                  <p className={styles.mediaLine}>
-                    提交时间：{formatTime(report.submitted_at) || "未记录"}
-                  </p>
-                  <p className={styles.mediaLine}>
-                    时长：
-                    {report.duration_sec === null
-                      ? "未记录"
-                      : `${report.duration_sec} 秒`}
-                  </p>
-                  {report.audio_url ? (
+                <div className={styles.mediaCard}>
+                  <h3 className={styles.cardTitle}>录音与转写</h3>
+                  {record.audio_url ? (
                     <SensitivePanel
-                      title="思想汇报录音"
+                      title="采集录音"
                       onExpand={() => setMediaAuditHint(MEDIA_AUDIT_HINT)}
                     >
-                      <audio
-                        className={styles.audio}
-                        controls
-                        preload="none"
-                        src={report.audio_url}
-                      />
+                      {audioSrc ? (
+                        <audio
+                          className={styles.audio}
+                          controls
+                          preload="auto"
+                          src={audioSrc}
+                        />
+                      ) : (
+                        <p className={styles.mediaEmpty}>录音加载中…</p>
+                      )}
+                      <p className={styles.mediaLine}>转写文本：</p>
+                      {record.transcript_text ? (
+                        <p className={styles.transcriptText}>
+                          {record.transcript_text}
+                        </p>
+                      ) : (
+                        <p className={styles.mediaEmpty}>暂无转写文本</p>
+                      )}
+                      <p className={styles.mediaLine}>情绪识别：</p>
+                      {record.emotion ? (
+                        <p className={styles.emotionText}>
+                          {emotionTone(record.emotion)}
+                          {record.emotion.valence !== null
+                            ? `（valence ${record.emotion.valence.toFixed(2)} / arousal ${
+                                record.emotion.arousal !== null
+                                  ? record.emotion.arousal.toFixed(2)
+                                  : "—"
+                              }）`
+                            : ""}
+                          {record.emotion.status === "degraded"
+                            ? " · 降级结果，仅供参考"
+                            : ""}
+                          {record.emotion.model_version
+                            ? ` · ${record.emotion.model_version}`
+                            : ""}
+                        </p>
+                      ) : (
+                        <p className={styles.mediaEmpty}>暂无情绪识别结果</p>
+                      )}
                     </SensitivePanel>
                   ) : (
-                    <p className={styles.mediaEmpty}>该日无录音</p>
+                    <p className={styles.mediaEmpty}>该条记录无录音</p>
                   )}
-                </>
-              ) : (
-                <p className={styles.mediaEmpty}>该日无思想汇报记录</p>
-              )}
-            </div>
-          </div>
+                </div>
+              </div>
+            ) : null}
+          </>
         ) : null}
 
         {mediaAuditHint ? (
@@ -671,6 +780,22 @@ export default function SubjectDetailPage() {
           </p>
         ) : null}
         <p className={styles.mediaNote}>{MEDIA_NOTICE}</p>
+
+        <details className={styles.timelineFold}>
+          <summary className={styles.timelineSummary}>
+            全部采集记录（含失败）
+          </summary>
+          {sessionsLoading ? <LoadingState text="正在加载会话记录…" /> : null}
+          {!sessionsLoading && sessionsError ? (
+            <ErrorBanner
+              message={sessionsError}
+              onRetry={() => void loadSessions()}
+            />
+          ) : null}
+          {!sessionsLoading && !sessionsError ? (
+            <SessionTimeline items={sessions} />
+          ) : null}
+        </details>
       </section>
 
       <section className={styles.section}>
@@ -761,15 +886,6 @@ export default function SubjectDetailPage() {
         </p>
       </section>
 
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>会话时间线</h2>
-        {sessionsLoading ? <LoadingState text="正在加载会话记录…" /> : null}
-        {!sessionsLoading && sessionsError ? (
-          <ErrorBanner message={sessionsError} onRetry={() => void loadSessions()} />
-        ) : null}
-        {!sessionsLoading && !sessionsError ? <SessionTimeline items={sessions} /> : null}
-      </section>
-
       {subject ? <SensevoiceSyncPanel subjectId={subject.subject_id} /> : null}
 
       <section className={styles.section}>
@@ -803,22 +919,138 @@ export default function SubjectDetailPage() {
           </button>
         </fieldset>
       </section>
-
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>敏感内容</h2>
-        <p className={styles.notice}>
-          默认折叠；展开需留痕，本轮仅提示占位文案，接入后调用审计留痕接口。
-        </p>
-        <div className={styles.sensitiveStack}>
-          <SensitivePanel title="面部图" onExpand={() => setAuditHint(AUDIT_HINT)} />
-          <SensitivePanel title="转写原文" onExpand={() => setAuditHint(AUDIT_HINT)} />
-        </div>
-        {auditHint ? (
-          <p className={styles.auditHint} role="status">
-            {auditHint}
-          </p>
-        ) : null}
-      </section>
     </section>
+  );
+}
+
+/** mock 直接返回 data URI，真实后端返回需要鉴权的相对路径。 */
+function isInlineUrl(url: string): boolean {
+  return url.startsWith("data:") || url.startsWith("blob:");
+}
+
+/** 按 valence 给出可读倾向；`label=neutral` 仍可能偏正向，不能只看 label。 */
+function emotionTone(emotion: MediaEmotion): string {
+  if (emotion.valence === null) {
+    return "未提供数值";
+  }
+  if (emotion.valence >= 0.3) {
+    return "偏正向";
+  }
+  if (emotion.valence <= -0.3) {
+    return "偏负向";
+  }
+  return "中性";
+}
+
+const WEEKDAY_LABELS = ["一", "二", "三", "四", "五", "六", "日"];
+
+type MediaDatePickerProps = {
+  availableDates: string[];
+  value: string;
+  disabled: boolean;
+  onChange: (date: string) => void;
+};
+
+/** 月历式日期选择器：仅有记录的日期可点击，其余自动置灰并禁用。 */
+function MediaDatePicker({
+  availableDates,
+  value,
+  disabled,
+  onChange,
+}: MediaDatePickerProps) {
+  const fallback = value || availableDates[0] || "";
+  const [viewMonth, setViewMonth] = useState(() => fallback.slice(0, 7));
+
+  useEffect(() => {
+    if (value) {
+      setViewMonth(value.slice(0, 7));
+    }
+  }, [value]);
+
+  if (availableDates.length === 0) {
+    return <p className={styles.mediaEmpty}>暂无可用日期</p>;
+  }
+
+  const available = new Set(availableDates);
+  const [yearText, monthText] = (viewMonth || fallback.slice(0, 7)).split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+
+  const shiftMonth = (delta: number) => {
+    const base = new Date(year, month - 1 + delta, 1);
+    setViewMonth(
+      `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, "0")}`,
+    );
+  };
+
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const leading = (new Date(year, month - 1, 1).getDay() + 6) % 7;
+  const cells: Array<string | null> = [
+    ...Array.from({ length: leading }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, index) => {
+      const day = index + 1;
+      return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    }),
+  ];
+
+  return (
+    <div className={styles.datePicker} role="group" aria-label="按日期筛选">
+      <div className={styles.datePickerHeader}>
+        <button
+          className={styles.datePickerNav}
+          type="button"
+          onClick={() => shiftMonth(-1)}
+          aria-label="上个月"
+        >
+          ‹
+        </button>
+        <span className={styles.datePickerTitle}>
+          {year} 年 {month} 月
+        </span>
+        <button
+          className={styles.datePickerNav}
+          type="button"
+          onClick={() => shiftMonth(1)}
+          aria-label="下个月"
+        >
+          ›
+        </button>
+      </div>
+      <div className={styles.datePickerWeekdays}>
+        {WEEKDAY_LABELS.map((label) => (
+          <span key={label}>{label}</span>
+        ))}
+      </div>
+      <div className={styles.datePickerGrid}>
+        {cells.map((date, index) => {
+          if (date === null) {
+            return <span key={`empty-${index}`} />;
+          }
+          const isAvailable = available.has(date);
+          const isSelected = date === value;
+          const classes = [
+            styles.datePickerCell,
+            isAvailable
+              ? styles.datePickerCellAvailable
+              : styles.datePickerCellDisabled,
+            isSelected ? styles.datePickerCellSelected : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+          return (
+            <button
+              key={date}
+              type="button"
+              className={classes}
+              disabled={!isAvailable || disabled}
+              aria-pressed={isSelected}
+              onClick={() => onChange(date)}
+            >
+              {Number(date.slice(8))}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }

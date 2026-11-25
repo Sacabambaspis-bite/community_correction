@@ -95,3 +95,27 @@ export async function requestData<T>(
   }
   return envelope.data;
 }
+
+/** 二进制媒体（照片/录音）不能直接放进 img/audio 的 src，需带鉴权拉取后转 blob URL。 */
+export async function fetchMediaBlob(
+  path: string,
+  role: ApiRole = "admin",
+): Promise<Blob> {
+  if (USE_MOCK) {
+    throw new Error("media_unavailable_in_mock");
+  }
+  const token = role === "admin" ? ADMIN_TOKEN : USER_TOKEN;
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    // 端点不存在或权限不足时会返回 200 + 业务信封。
+    const envelope = (await response.json()) as Envelope<unknown>;
+    throw new ApiError(envelope);
+  }
+  if (!response.ok) {
+    throw new Error(`media_http_${response.status}`);
+  }
+  return response.blob();
+}

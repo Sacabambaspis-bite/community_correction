@@ -17,7 +17,7 @@ from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.analysis.errors import AnalysisInputError
-from app.analysis.paths import resolve_session_file
+from app.analysis.paths import resolve_session_file, transcript_relative_path
 from app.analysis.sensevoice_sync import (
     SensevoiceSyncError,
     sync_configured,
@@ -362,6 +362,200 @@ def get_session_face(
         raise BizError(INTERNAL_ERROR, "audit_write_failed")
 
     return FileResponse(target, media_type="image/jpeg")
+
+
+# ---- 媒体读取（api.md §7.21 / §7.22）----
+
+#: 管理端展示用转写文本上限，避免把超长原文整段返回。
+_TRANSCRIPT_MAX_CHARS = 2000
+
+
+def _parse_media_date(value: Optional[str]) -> Optional[date]:
+    """严格校验 `YYYY-MM-DD`；格式非法统一返回 `1001 invalid_date`。"""
+    if value is None:
+        return None
+    if not _WINDOW_END_PATTERN.match(value):
+        raise BizError(INVALID_REQUEST, "invalid_date")
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        raise BizError(INVALID_REQUEST, "invalid_date") from None
+
+
+def _read_transcript(session: CaptureSession) -> Optional[str]:
+    """读取会话目录下的转写文本；越界、缺失或空白一律返回 None。"""
+    relative = transcript_relative_path(session.subject_id, session.id)
+    try:
+        target = resolve_session_file(
+            STORAGE_ROOT, session.subject_id, session.id, relative
+        )
+    except AnalysisInputError:
+        return None
+    if not target.is_file():
+        return None
+    try:
+        text = target.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return None
+    return text[:_TRANSCRIPT_MAX_CHARS] if text else None
+
+
+def _media_emotion(session: CaptureSession) -> Optional[dict]:
+    """从 analysis_json 提取语音情绪通道结果；未分析或结构异常返回 None。"""
+    raw = getattr(session, "analysis_json", None)
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    channel = (payload.get("channels") or {}).get("emotion") or {}
+    output = channel.get("output") or {}
+    if not output:
+        return None
+    return {
+        "status": channel.get("status"),
+        "model_version": channel.get("model_version"),
+        "valence": output.get("valence"),
+        "arousal": output.get("arousal"),
+        "label": output.get("label"),
+    }
+
+
+def _media_record(session: CaptureSession, transcript: Optional[str]) -> dict:
+    """单条采集记录：媒体 URL 与转写按是否存在给值，其余字段原样透出。"""
+    return {
+        "session_id": session.id,
+        "kind": session.kind,
+        "captured_at": session.captured_at,
+        "capture_status": session.capture_status,
+        "analysis_status": session.analysis_status,
+        "duration_sec": session.duration_sec,
+        "image_url": (
+            f"/api/admin/sessions/{session.id}/face" if session.face_path else None
+        ),
+        "audio_url": (
+            f"/api/admin/sessions/{session.id}/audio" if session.audio_path else None
+        ),
+        "transcript_text": transcript,
+        "emotion": _media_emotion(session),
+    }
+
+
+@router.get("/subjects/{subject_id}/media")
+def get_subject_media(
+    subject_id: str,
+    date_str: Optional[str] = Query(default=None, alias="date"),
+    _role: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    subject = db.get(Subject, subject_id)
+    if subject is None:
+        raise BizError(NOT_FOUND, "not_found")
+    requested = _parse_media_date(date_str)
+
+    sessions = (
+        db.execute(
+            select(CaptureSession)
+            .where(CaptureSession.subject_id == subject_id)
+            .where(CaptureSession.status == "captured")
+            .order_by(desc(CaptureSession.captured_at))
+        )
+        .scalars()
+        .all()
+    )
+
+    by_day: dict[date, list[CaptureSession]] = {}
+    for session in sessions:
+        day = to_local_date(session.captured_at)
+        if day is None:
+            continue
+        by_day.setdefault(day, []).append(session)
+
+    available = sorted(by_day, reverse=True)
+    chosen = requested if requested is not None else (available[0] if available else None)
+    selected = by_day.get(chosen, []) if chosen is not None else []
+
+    # 查询结果按 captured_at 降序；反转为升序（最早在前、最新在后），
+    # 前端默认选中最后一条即「该日最近更新的记录」。
+    records: list[dict] = []
+    transcript_count = 0
+    for session in reversed(selected):
+        transcript = _read_transcript(session)
+        if transcript is not None:
+            transcript_count += 1
+        records.append(_media_record(session, transcript))
+
+    if transcript_count:
+        db.add(
+            AuditLog(
+                actor_type="staff",
+                actor_id=None,
+                action="sensitive.view",
+                target_type="subject",
+                target_id=subject_id,
+                detail_json=json.dumps(
+                    {
+                        "field": "transcript",
+                        "date": chosen.isoformat(),
+                        "count": transcript_count,
+                    }
+                ),
+                request_id=current_request_id(),
+                created_at=_now(),
+            )
+        )
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise BizError(INTERNAL_ERROR, "audit_write_failed")
+
+    resolved = chosen or requested or date.today()
+    return envelope(
+        data={
+            "subject_id": subject_id,
+            "date": resolved.isoformat(),
+            "available_dates": [day.isoformat() for day in available],
+            "items": records,
+        }
+    )
+
+
+@router.get("/sessions/{session_id}/audio")
+def get_session_audio(
+    session_id: str,
+    _role: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    session = db.get(CaptureSession, session_id)
+    if session is None or not session.audio_path:
+        raise BizError(NOT_FOUND, "not_found")
+
+    root = Path(STORAGE_ROOT).resolve()
+    target = (root / session.audio_path).resolve()
+    if not target.is_relative_to(root) or not target.is_file():
+        raise BizError(NOT_FOUND, "not_found")
+
+    db.add(
+        AuditLog(
+            actor_type="staff",
+            actor_id=None,
+            action="sensitive.view",
+            target_type="session",
+            target_id=session_id,
+            detail_json=json.dumps({"field": "audio"}),
+            request_id=current_request_id(),
+            created_at=_now(),
+        )
+    )
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise BizError(INTERNAL_ERROR, "audit_write_failed")
+
+    return FileResponse(target, media_type="audio/wav")
 
 
 # ---- 复盘（api.md §7.9 / §7.14）----

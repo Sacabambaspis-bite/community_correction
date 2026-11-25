@@ -480,30 +480,36 @@ export type SubjectTrends = {
  * 原型扩展：api@1.5 明确不返回音频与原始影像，联调前需补契约与留痕规则。
  */
 
-export type DailyCheckinMedia = {
-  checkin_id: string;
+/** 语音情绪通道结果，与录音一一对应。 */
+export type MediaEmotion = {
+  /** 通道状态：ok / degraded / failed。 */
+  status: string | null;
+  model_version: string | null;
+  valence: number | null;
+  arousal: number | null;
+  label: string | null;
+};
+
+export type DailyMediaRecord = {
+  session_id: string;
+  kind: SessionKind;
   captured_at: string;
-  image_url: string | null;
   capture_status: CaptureStatus | null;
-};
-
-export type DailyReportMedia = {
-  report_id: string;
-  submitted_at: string;
+  analysis_status: AnalysisStatus;
   duration_sec: number | null;
+  image_url: string | null;
   audio_url: string | null;
-};
-
-export type DailyMedia = {
-  date: string;
-  checkin: DailyCheckinMedia | null;
-  report: DailyReportMedia | null;
+  /** 与音频一一对应的转写文本；无转写时为 null。 */
+  transcript_text: string | null;
+  /** 与音频一一对应的语音情绪；未分析时为 null。 */
+  emotion: MediaEmotion | null;
 };
 
 export type SubjectMediaData = {
   subject_id: string;
   date: string;
   available_dates: string[];
-  item: DailyMedia | null;
+  /** 当日全部采集记录，按 captured_at 升序；前端默认选中最后一条（最新）。 */
+  items: DailyMediaRecord[];
 };
 

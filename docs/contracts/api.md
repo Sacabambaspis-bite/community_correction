@@ -1188,6 +1188,96 @@ SSE 事件（`data` 均为 JSON）：
 4. 日志仅记录 `request_id`、端点、状态、上游 HTTP 状态码与耗时；不记录请求体、响应体与异常原文。
 5. 流内审计使用新的 session 工厂上下文，不复用请求级 Session；审计失败不得中断已发送的流。
 
+### 7.21 `GET /api/admin/subjects/{subject_id}/media`
+
+对象详情页按日期展示打卡影像、思想汇报录音与对应转写文本。需 `staff`。
+
+```bash
+curl "http://localhost:8000/api/admin/subjects/3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c/media?date=2026-11-25" \
+  -H "Authorization: Bearer admin_demo"
+```
+
+**查询参数**
+
+| 参数 | 必填 | 默认 | 说明 |
+|---|---|---|---|
+| `date` | 否 | 最新有记录的自然日 | `YYYY-MM-DD` |
+
+**响应 `data`**
+
+```json
+{
+  "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
+  "date": "2026-11-25",
+  "available_dates": ["2026-11-25", "2026-11-24"],
+  "items": [
+    {
+      "session_id": "9f1c6d0e-3a4b-4c5d-8e9f-0a1b2c3d4e5f",
+      "kind": "checkin",
+      "captured_at": "2026-11-25T08:12:03+08:00",
+      "capture_status": "ok",
+      "analysis_status": "done",
+      "duration_sec": null,
+      "image_url": "/api/admin/sessions/9f1c6d0e-3a4b-4c5d-8e9f-0a1b2c3d4e5f/face",
+      "audio_url": null,
+      "transcript_text": null,
+      "emotion": null
+    },
+    {
+      "session_id": "6d93a7a3-e05a-40e4-9ebc-1db9bc51e529",
+      "kind": "report",
+      "captured_at": "2026-11-25T22:29:33+08:00",
+      "capture_status": "ok",
+      "analysis_status": "done",
+      "duration_sec": 17.4,
+      "image_url": "/api/admin/sessions/6d93a7a3-e05a-40e4-9ebc-1db9bc51e529/face",
+      "audio_url": "/api/admin/sessions/6d93a7a3-e05a-40e4-9ebc-1db9bc51e529/audio",
+      "transcript_text": "今天按时完成了思想汇报……",
+      "emotion": {
+        "status": "ok",
+        "model_version": "sensevoice-emotion@1.0",
+        "valence": 0.6,
+        "arousal": 0.6,
+        "label": "neutral"
+      }
+    }
+  ]
+}
+```
+
+**生成规则**
+
+1. `available_dates`：该对象 `status=captured` 的会话按本地自然日去重，降序排列；`created` / `failed` 不计入。
+2. `items` 为当日全部 `status=captured` 会话，**按 `captured_at` 升序**（最早在前、最新在后）。前端默认选中最后一条（即当日最近更新的记录），并提供「上一条 / 下一条」按时间顺序浏览。
+3. `image_url` 仅在 `face_path` 非空时返回；`audio_url` 仅在 `audio_path` 非空时返回；否则对应字段为 `null`。
+4. `transcript_text` 读取该会话目录下 `transcript.txt`，去除首尾空白，上限 2000 字符；文件不存在或为空返回 `null`。
+5. 两个 `*_url` 均为**相对路径**，客户端必须带 `Authorization` 头以 blob 方式加载（不可直接放进 `<img>` / `<audio>` 的 `src`）。
+6. 当日本次响应含任意非空 `transcript_text` 时写**一条**汇总 `audit_logs`：`action="sensitive.view"`、`target_type="subject"`、`target_id=subject_id`、`detail_json={"field":"transcript","date":"YYYY-MM-DD","count":N}`。
+7. `emotion` 取自该会话 `analysis_json.channels.emotion`，与录音一一对应；未分析、无该通道或结构异常时为 `null`。`label` 取值 `neutral / negative / strong_negative`，前端应结合 `valence` 表达倾向，不得仅凭 `label=neutral` 判定为"中性"。
+
+**错误**
+
+| 条件 | 返回 |
+|---|---|
+| 对象不存在 | `1004`，`message=not_found` |
+| `date` 非 `YYYY-MM-DD` | `1001`，`message=invalid_date` |
+| 当日无任何记录 | `code=0`，`items` 为 `[]` |
+
+### 7.22 `GET /api/admin/sessions/{session_id}/audio`
+
+返回会话录音原始字节（`audio/wav`），供管理端播放。需 `staff`。
+
+```bash
+curl -o report.wav "http://localhost:8000/api/admin/sessions/6d93a7a3-e05a-40e4-9ebc-1db9bc51e529/audio" \
+  -H "Authorization: Bearer admin_demo"
+```
+
+**规则**
+
+1. 仅当会话 `audio_path` 非空且文件位于 `storage/` 内（防目录穿越）时返回 `FileResponse`；支持 `Range` 请求。
+2. 会话不存在、无录音、文件缺失或路径越界一律 `1004 not_found`。
+3. 成功返回前写 `audit_logs(sensitive.view, target_type="session", target_id=session_id, detail={"field":"audio"})`。
+
 ## 8. 前端联调 mock
 
 后端未就绪时，前端使用 `web/src/mock/` 下的固定响应：
@@ -1224,3 +1314,5 @@ mock 数据必须与本节示例字段完全一致，不得增删字段。
 | 1.5（实现补记·四） | 2026-11-25 | 思想汇报同步脚手架：新增 `sensevoice_syncs` 表（db@1.5 §7）与三个管理端端点（§7.15–7.17）；`SENSEVOICE_SYNC_ENABLED` 默认关闭；新增业务码 `2004` / `5001`；读取转写写 `sensitive.view`，同步成功写 `sensevoice.sync` |
 | 1.5（实现补记·五） | 2026-11-25 | 新增 `GET /api/admin/subjects/{subject_id}/trends`（§7.18）：任意日期区间多维聚合（日五色、分析最高风险档、文本效价/信号均值与标准差、一致性告警、行为依从性、散点）；缺省近 14 天、上限 366 天；只回 `signals` 机器码不回中文结论；只读不落库、不含敏感原文；保留 dashboard / `trend_7d` 兼容 |
 | 1.5（实现补记·六） | 2026-11-25 | 新增 AI 援助 `GET /api/user/ai-assist/status`、`POST /api/user/ai-assist/chat`（§7.19–7.20）：DeepSeek `deepseek-flash` + `thinking.type=disabled` + `tools:[{"type":"deepseek_web_search"}]`，不设 `tool_choice`；SSE 流式；无 Key 返回中性提示不报 500；不支持工具时自动降级并提示「本次回答未启用联网搜索」；对话不落业务表，仅写 `audit_logs(ai_assist.chat)` 元数据 |
+| 1.5（实现补记·七） | 2026-11-25 | 新增管理端媒体读取：`GET /api/admin/subjects/{subject_id}/media`（§7.21，按日返回打卡影像 URL、汇报音频 URL 与转写文本，缺失字段为 `null`）与 `GET /api/admin/sessions/{session_id}/audio`（§7.22，`audio/wav` + Range）；URL 一律相对路径、客户端带鉴权以 blob 加载；读取转写写 `sensitive.view` |
+| 1.5（实现补记·八） | 2026-11-25 | §7.21 响应由单条 `item` 改为 `items[]`：返回当日全部 `captured` 会话并按 `captured_at` 升序，前端默认选中最后一条（当日最新），支持「上一条 / 下一条」；转写审计改为单条汇总并带 `count` |

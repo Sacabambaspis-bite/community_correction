@@ -13,7 +13,7 @@ import type {
   AiAssistStatus,
   CaptureStatus,
   ConsentData,
-  DailyMedia,
+  DailyMediaRecord,
   DashboardData,
   Envelope,
   FeedbackData,
@@ -55,6 +55,7 @@ type RawDailyMedia = {
     submitted_at: string;
     duration_sec: number | null;
     audio_available: boolean;
+    transcript_text?: string | null;
   } | null;
 };
 
@@ -551,28 +552,45 @@ function mockImageUrl(prompt: string | null): string | null {
   return `https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=${encodeURIComponent(prompt)}&image_size=portrait_4_3`;
 }
 
-function dailyMediaOf(raw: RawDailyMedia): DailyMedia {
-  return {
-    date: raw.date,
-    checkin: raw.checkin
-      ? {
-          checkin_id: raw.checkin.checkin_id,
-          captured_at: raw.checkin.captured_at,
-          capture_status: raw.checkin.capture_status,
-          image_url: mockImageUrl(raw.checkin.image_prompt),
-        }
-      : null,
-    report: raw.report
-      ? {
-          report_id: raw.report.report_id,
-          submitted_at: raw.report.submitted_at,
-          duration_sec: raw.report.duration_sec,
-          audio_url: raw.report.audio_available
-            ? mockAudioUrl(raw.report.report_id)
-            : null,
-        }
-      : null,
-  };
+function dailyRecordsOf(raw: RawDailyMedia): DailyMediaRecord[] {
+  const records: DailyMediaRecord[] = [];
+  if (raw.checkin) {
+    records.push({
+      session_id: raw.checkin.checkin_id,
+      kind: "checkin",
+      captured_at: raw.checkin.captured_at,
+      capture_status: raw.checkin.capture_status,
+      analysis_status: "done",
+      duration_sec: null,
+      image_url: mockImageUrl(raw.checkin.image_prompt),
+      audio_url: null,
+      transcript_text: null,
+      emotion: null,
+    });
+  }
+  if (raw.report) {
+    records.push({
+      session_id: raw.report.report_id,
+      kind: "report",
+      captured_at: raw.report.submitted_at,
+      capture_status: "ok",
+      analysis_status: "done",
+      duration_sec: raw.report.duration_sec,
+      image_url: null,
+      audio_url: raw.report.audio_available
+        ? mockAudioUrl(raw.report.report_id)
+        : null,
+      transcript_text: raw.report.transcript_text ?? null,
+      emotion: {
+        status: "ok",
+        model_version: "mock-emotion@1.0",
+        valence: 0.1,
+        arousal: 0.3,
+        label: "neutral",
+      },
+    });
+  }
+  return records;
 }
 
 function taskState(subjectId: string, kind: SessionKind): UserTaskData {
@@ -933,7 +951,7 @@ export async function mockRequest<T>(
       subject_id: subjectId,
       date: requestedDate,
       available_dates: availableDates,
-      item: raw ? dailyMediaOf(raw) : null,
+      items: raw ? dailyRecordsOf(raw) : [],
     });
   }
 
