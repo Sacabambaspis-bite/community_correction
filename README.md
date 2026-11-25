@@ -3,7 +3,7 @@
 > 单对象纵向切片原型：把一次采集（人脸 + 语音）转成结构化信号，经四路分析与五色分级，**分级结果唯一出口是人工复核工单**。系统自身不产生任何处置动作。
 
 - 当前状态：原型（非生产可用），核心链路已打通，分析侧除 ASR 外仍为确定性 Mock。
-- 最近验证：`pytest tests -q` → 273 passed；`web` 构建通过。
+- 最近验证：`pytest tests -q` → 286 passed；`web` 的 `typecheck` 与 `build` 通过。
 - 进度与风险：[docs/PROGRESS.md](./docs/PROGRESS.md)
 - 产品与架构：[docs/prd.md](./docs/prd.md)、[docs/architecture.md](./docs/architecture.md)
 
@@ -39,9 +39,11 @@
 | 分级 | 单次规则、七日趋势、合成封顶、工单草案 | 已实现 |
 | API | 统一响应信封、双 token 鉴权、采集/分析/复盘/工单/看板 | 已实现 |
 | 业务形态 | 刷脸签到、录音思想汇报、按对象配置频率、逾期 → P0 复核工单 | 已实现 |
-| 用户端 | 知情同意、模块选择、签到、思想汇报、结果反馈 | 已实现（Mock 联调） |
+| 用户端 | 登录（含统一知情同意）、模块选择、签到、思想汇报、结果反馈 | 已实现（Mock 联调） |
 | 用户端扩展入口 | 「AI援助」「教育学习」两个入口卡片 + 统一「功能待开发」占位页 | **仅前端占位，暂无后端支持** |
-| 管理端 | 对象列表/详情、频率配置、状态看板、复核工单队列 | 已实现（Mock 联调） |
+| 管理端 | 对象列表/详情、频率配置、复核工单队列 | 已实现（Mock 联调） |
+| 管理端对象详情 | 基础档案（性别/年龄/身份证号等）、按日期查看打卡影像与思想汇报录音（在线预览/播放）、状态概览与七日趋势 | 已实现（Mock 媒体） |
+| 状态看板 | 已整体合并进对象详情页，不再保留独立入口；`/admin/dashboard` 仅做重定向 | 已合并 |
 
 ### 刷脸签到与思想汇报的差异
 
@@ -82,8 +84,8 @@ community-correction/
 │  └─ api/                  # FastAPI 应用、路由、依赖、错误信封、集成层
 │     └─ routers/           # health / sessions / user / admin
 ├─ web/
-│  ├─ src/user/             # 用户端：Consent / Capture / Checkin / Feedback
-│  ├─ src/admin/            # 管理端：Subjects / SubjectDetail / Dashboard / Tickets
+│  ├─ src/user/             # 用户端：Login / Capture / Checkin / Feedback
+│  ├─ src/admin/            # 管理端：Subjects / SubjectDetail（档案+媒体+状态概览）/ Tickets
 │  ├─ src/api/              # API 客户端、类型、mock
 │  ├─ src/components/common/# 色码徽标、敏感面板、状态视图
 │  ├─ src/lib/              # 环境变量、HTTP、守卫、错误文案
@@ -215,8 +217,10 @@ uvicorn app.api.main:app --port 8000
 | `VITE_API_BASE_URL` | 空（同源代理） | 直连后端时填写 |
 | `VITE_USER_TOKEN` | `user_demo` | 用户端 token |
 | `VITE_ADMIN_TOKEN` | `admin_demo` | 管理端 token |
-| `VITE_SUBJECT_ID` | 演示 UUID | 当前演示对象 |
+| `VITE_SUBJECT_ID` | S001（`d0676c19-…`） | 登录后使用的演示对象；需先执行 `scripts/seed_demo.py` |
 | `VITE_ROLE` | `staff` | 演示角色 |
+| `VITE_DEMO_USERNAME` | `张三` | 用户端开发测试账号（仅本地联调，非真实认证） |
+| `VITE_DEMO_PASSWORD` | `123456` | 用户端测试密码 |
 
 ### 关于 `.env`
 
@@ -261,7 +265,7 @@ $env:SENSEVOICE_API_KEY = "..."
 $U = @{ Authorization = "Bearer user_demo" }
 $SID = "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c"
 
-# 1) 提交知情同意（两项独立勾选，一次提交，长期有效）
+# 1) 提交知情同意（登录页单次勾选，同时授权面部与语音，一次提交长期有效）
 curl.exe -X PUT "http://127.0.0.1:8000/api/user/consent" -H "Authorization: Bearer user_demo" `
   -H "Content-Type: application/json" `
   -d '{\"subject_id\":\"3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c\",\"face\":true,\"audio\":true}'
@@ -310,15 +314,16 @@ curl.exe -X POST "http://127.0.0.1:8000/api/admin/tickets/<ticket_id>/transition
 
 | 路径 | 页面 | 说明 |
 |---|---|---|
-| `/consent` | 知情同意 | 首次进入必须完成；**提交成功后直接跳转 `/capture`**，无中间引导页 |
+| `/login` | 用户登录 | 用户名 / 密码 + 统一知情同意；开发测试账号 `张三 / 123456`，登录并同意后进入 `/capture` |
+| `/consent` | 旧同意地址 | 独立页面已移除，访问即跳转 `/login` |
 | `/capture` | 事项选择 | 四张卡片：刷脸签到 / 录音思想汇报（含频率与逾期提示）+ AI援助 / 教育学习 |
 | `/capture/checkin` | 刷脸签到 | 正视摄像头 → 拍摄 → 等待完成 |
 | `/capture/report` | 思想汇报 | 开始录音 → 结束录音 → 保存处理 → 结果反馈 |
 | `/pending?feature=ai-aid\|education` | 功能待开发 | 新增入口的统一占位页，可返回事项选择 |
 | `/feedback/:sessionId` | 结果反馈 | 仅展示行为建议，不显示色码 |
 | `/admin/subjects` | 对象列表 | 最近签到/汇报时间、逾期徽标 |
-| `/admin/subjects/:subjectId` | 对象详情 | 频率编辑、会话时间线 |
-| `/admin/dashboard` | 状态看板 | 对象状态与逾期提示 |
+| `/admin/subjects/:subjectId` | 对象详情 | 基础档案、按日期影像/录音、五色分布与趋势、频率编辑、会话时间线 |
+| `/admin/dashboard` | 旧看板地址 | 独立看板已合并进对象详情，访问即跳转 `/admin/subjects` |
 | `/admin/tickets` | 复核队列 | 工单列表 |
 | `/admin/tickets/:ticketId` | 工单详情 | 证据、逾期来源、流转操作 |
 
@@ -338,6 +343,24 @@ curl.exe -X POST "http://127.0.0.1:8000/api/admin/tickets/<ticket_id>/transition
 - **占位页参数受白名单限制**：`feature` 仅识别 `ai-aid` / `education`，其他取值只显示中性文案「该功能」。
 - **样式一致**：复用事项卡片的栅格与卡片样式（`auto-fit, minmax(240px, 1fr)`），窄屏自动单列。
 - 扩展时的建议：新增独立路由与页面，并在后端补对应接口后再开放入口，不修改现有签到 / 汇报链路。
+
+### 8.6 管理端对象详情增强（本期新增）
+
+对象列表的**姓名**字段可直接点击进入 `/admin/subjects/:subjectId`，详情页由三部分组成：
+
+| 区域 | 内容 | 数据来源（当前） |
+|---|---|---|
+| 基础档案 | 姓名、编号、状态、性别、年龄、身份证号、联系电话、住址、矫正类别与起止日期 | `GET /api/admin/subjects/{id}`（mock 扩展 `profiles`） |
+| 打卡与思想汇报 | 选择日期后展示该日打卡影像与思想汇报录音；影像内联预览、录音原生播放；另提供该对象有记录的日期快捷按钮 | `GET /api/admin/subjects/{id}/media?date=YYYY-MM-DD`（mock） |
+| 状态概览 | 五色分布、近 7 天趋势、待复核工单数、最近采集与「危机·逾期」标记 | `GET /api/admin/dashboard?subject_id=...`（mock `variants`） |
+
+交互与隐私约定：
+
+- 媒体统一放入敏感面板（`SensitivePanel`），**默认折叠**，展开时提示「调阅记录待接入 audit 留痕」；不写入浏览器持久化存储，不自动播放。
+- 日期筛选与状态概览并行加载，任一失败只影响对应区块，不影响档案展示。
+- 状态概览与原独立看板内容一致，原 `/admin/dashboard` 与导航入口均已下线。
+
+> 当前媒体为演示素材：影像由文生图占位服务生成，录音为运行时构造的 2 秒静音 WAV；真实影像/音频接口、留存期与审计留痕尚未进入契约，联调时需一并补齐。
 
 ---
 
@@ -371,12 +394,20 @@ python scripts\seed_demo.py --reset    # 清空后重建
 ## 11. 测试
 
 ```powershell
-pytest tests -q                 # 全量：273 passed
+pytest tests -q                 # 全量：286 passed
 pytest tests/test_api -q        # 接口
 pytest tests/test_analysis -q   # 分析
 pytest tests/test_grading -q    # 分级
 pytest tests/test_capture -q    # 采集
 pytest tests/test_db -q         # 数据层
+```
+
+前端校验：
+
+```powershell
+cd web
+npm run typecheck
+npm run build
 ```
 
 测试约定：
@@ -472,6 +503,10 @@ pytest tests/test_db -q         # 数据层
 | 采集设备 | 采集运行在后端宿主设备，暂不支持浏览器内采集 |
 | 手动录音 | 已通过假采集与单元测试闭环，真实长时录音的设备侧表现待现场验证 |
 | AI援助 / 教育学习 | 仅前端入口与「功能待开发」占位页，**无后端接口、无业务逻辑、无数据留存** |
+| 用户登录 | 开发阶段演示账号（前端校验，密码会进入打包产物），**非真实身份认证**；生产需接入真实用户体系 |
+| 管理端档案字段 | 性别 / 年龄 / 身份证号 / 住址等由前端 mock 扩展，`db` / `api` 契约尚未定义；身份证号目前明文展示，接入真实接口前需补脱敏与权限规则 |
+| 管理端媒体预览 | 打卡影像为文生图占位、录音为运行时生成的 2 秒静音 WAV；媒体端点、鉴权、留存期与 audit 留痕未入契约，暂不可用于真实调阅 |
+| 状态看板 | 已合并进对象详情，独立页面与导航入口已移除 |
 
 ---
 

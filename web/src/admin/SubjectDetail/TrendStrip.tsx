@@ -1,6 +1,7 @@
-/* 7 日趋势（ui@1.2 §4.3）：日期 + 中文色名 + 小色块，保持单对象，不做多对象对比。 */
+/* 7 日趋势（ui@1.2 §4.3，已并入对象详情）：日期 + 中文色名 + 小色块，
+ * 保持单对象，不做多对象对比。 */
 import { COLOR_META, type Color } from "../../lib/colors";
-import styles from "./Dashboard.module.css";
+import styles from "./SubjectDetail.module.css";
 
 type TrendPoint = {
   date: string;

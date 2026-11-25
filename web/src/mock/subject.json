@@ -36,5 +36,99 @@
   ],
   "page": 1,
   "page_size": 20,
-  "total": 3
+  "total": 3,
+  "profiles": {
+    "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c": {
+      "gender": "female",
+      "age": 34,
+      "id_card": "310101199203071234",
+      "phone": "13800002211",
+      "address": "上海市浦东新区张江路 128 弄 6 号 502 室",
+      "correction_type": "缓刑（社区矫正）",
+      "start_date": "2026-03-01",
+      "end_date": "2027-02-28"
+    },
+    "7c2a5f18-6d3b-4e9a-9c01-2b3c4d5e6f70": {
+      "gender": "male",
+      "age": 28,
+      "id_card": "310104199806152318",
+      "phone": "13900003322",
+      "address": "上海市徐汇区漕溪北路 45 号 3 号楼 901 室",
+      "correction_type": "管制（社区矫正）",
+      "start_date": "2026-06-15",
+      "end_date": "2027-06-14"
+    },
+    "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d": {
+      "gender": "female",
+      "age": 41,
+      "id_card": "310110198501204526",
+      "phone": "13700004433",
+      "address": "上海市杨浦区国定路 88 号 2 号楼 304 室",
+      "correction_type": "假释（社区矫正）",
+      "start_date": "2025-12-20",
+      "end_date": "2026-12-19"
+    }
+  },
+  "media": {
+    "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c": [
+      {
+        "date": "2026-11-23",
+        "checkin": {
+          "checkin_id": "ck-20261123-s001",
+          "captured_at": "2026-11-23T09:00:12+08:00",
+          "capture_status": "ok",
+          "image_prompt": "Documentary style photo of an adult woman standing indoors facing the camera in a plain office room, natural window light, neutral expression, upper body, realistic, no text"
+        },
+        "report": {
+          "report_id": "rp-20261123-s001",
+          "submitted_at": "2026-11-23T10:12:36+08:00",
+          "duration_sec": 42,
+          "audio_available": true
+        }
+      },
+      {
+        "date": "2026-11-20",
+        "checkin": {
+          "checkin_id": "ck-20261120-s001",
+          "captured_at": "2026-11-20T09:02:41+08:00",
+          "capture_status": "ok",
+          "image_prompt": "Documentary style photo of an adult woman standing in a bright community service center, plain wall behind, facing the camera, natural light, realistic, no text"
+        },
+        "report": {
+          "report_id": "rp-20261120-s001",
+          "submitted_at": "2026-11-20T09:41:10+08:00",
+          "duration_sec": 35,
+          "audio_available": true
+        }
+      },
+      {
+        "date": "2026-11-17",
+        "checkin": {
+          "checkin_id": "ck-20261117-s001",
+          "captured_at": "2026-11-17T08:58:03+08:00",
+          "capture_status": "partial",
+          "image_prompt": "Documentary style photo of a woman in a simple indoor room facing the camera slightly off center, soft indoor lighting, realistic, no text"
+        },
+        "report": null
+      }
+    ],
+    "7c2a5f18-6d3b-4e9a-9c01-2b3c4d5e6f70": [],
+    "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d": [
+      {
+        "date": "2026-11-20",
+        "checkin": {
+          "checkin_id": "ck-20261120-s003",
+          "captured_at": "2026-11-20T08:47:19+08:00",
+          "capture_status": "ok",
+          "image_prompt": "Documentary style photo of a middle aged woman standing indoors facing the camera in a plain room, natural light, neutral expression, realistic, no text"
+        },
+        "report": {
+          "report_id": "rp-20261120-s003",
+          "submitted_at": "2026-11-20T09:28:00+08:00",
+          "duration_sec": 58,
+          "audio_available": true
+        }
+      }
+    ]
+  }
 }

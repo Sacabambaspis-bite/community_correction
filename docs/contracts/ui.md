@@ -28,6 +28,18 @@
 >
 > 补充：两个采集子页 `/capture/report`、`/capture/checkin` 的**右上角**也提供同文案「返回首页」按钮（次要按钮样式、`min-height: 40px`，跳转 `/capture`），页面底部保留原有文字链接；不改变原有录制、上传、人脸校验与结果展示逻辑。
 
+> **v1.2 实现补记 7（2026-11-25，附加、非破坏）**：用户端新增登录页 `/login`，原独立知情同意页 `/consent` 的功能合并至登录页，不再保留独立页面（`/consent` 仅做跳转到 `/login`）。
+> 1. 登录页包含用户名、密码输入与「登录并进入」按钮；开发演示账号为 `张三 / 123456`，可通过 `VITE_DEMO_USERNAME` / `VITE_DEMO_PASSWORD` 覆盖，**仅用于本地联调，不代表真实身份认证**。
+> 2. 原「面部图像」与「语音」两项独立勾选合并为**单一统一同意勾选**，一次勾选同时授权两项；提交时仍调用 `PUT /api/user/consent` 并携带 `face=true, audio=true`，api@1.5 契约不变。
+> 3. 进入条件：账号密码正确 **且** 已勾选统一同意；同意成功写库后才跳转 `/capture`，任一条不满足均停留登录页并给出中性提示。
+> 4. 路由守卫：用户端未登录或后端同意不完整（`general` / `face` / `audio` 任一未授权）统一跳 `/login`；管理端守卫不变。
+> 5. 登录态仅保存用户名与时间到 `localStorage` 的 `cc.user.session`，禁止写入人脸、音频、转写等内容；退出登录只清除本地登录态，不撤回已提交的同意。
+> 6. 原 §3.1「禁止把两项同意折叠进一个总协议 checkbox」自本条起废止，以本条为准。
+
+> v1.2 实现补记 8（2026-11-25，附加、非破坏）：管理端对象详情新增「思想汇报同步」面板（§4.2）——同步按钮、能力未启用提示、同步记录列表、查看完整报告（转写全文 + 情绪类型/置信度/关键触发片段），展示数据版本、操作人与时间。真实同步由 `SENSEVOICE_SYNC_ENABLED` 控制，默认关闭；关闭时按钮可用但点击返回「同步能力未启用」中性提示，不伪造转写/情绪内容。
+
+> v1.2 实现补记 9（2026-11-25，附加、非破坏）：管理端对象详情增强。① 对象列表「姓名」为详情链接（`/admin/subjects/:subjectId`）；② 详情页新增基础档案（性别、年龄、身份证号、联系电话、住址、矫正类别与起止日期）；③ 新增按日期筛选的「打卡与思想汇报」区块，展示该日打卡影像与思想汇报录音，支持在线预览/播放，媒体统一置于默认折叠的敏感面板；④ 原独立状态看板（§4.3）全部内容合并进对象详情，`/admin/dashboard` 与导航入口下线，旧地址重定向 `/admin/subjects`。档案字段、媒体端点与留痕规则尚待 `db` / `api` 契约补齐；当前原型媒体为演示素材（占位影像 + 2 秒静音 WAV），不得用于真实调阅。
+
 ---
 
 ## 1. 技术约定
@@ -47,7 +59,8 @@
 
 | 端 | 路径 | 页面 | 组件目录 |
 |---|---|---|---|
-| user | `/consent` | 知情同意页 | `web/src/user/Consent/` |
+| user | `/login` | 用户登录页（含统一知情同意） | `web/src/user/Login/` |
+| user | `/consent` | 旧同意地址，仅跳转 `/login` | 无独立页面 |
 | user | `/capture` | 模块选择页（签到 / 思想汇报） | `web/src/user/Capture/` |
 | user | `/capture/checkin` | 刷脸签到子页（face_only） | `web/src/user/Checkin/` |
 | user | `/capture/report` | 思想汇报子页（face+audio，原采集引导页） | `web/src/user/Capture/` |
@@ -61,13 +74,15 @@
 
 路由守卫：
 
-- 用户端：未同意（`GET /api/me/consent` 的 `general.granted != true`）访问 `/capture` 强制跳 `/consent`；
+- 用户端：未登录，或 `GET /api/user/consent` 的 `general/face/audio` 任一未授权，访问 `/capture` 强制跳 `/login`（补记 7）；
 - 管理端：`role != staff` 时全部跳登录/403 页；
-- 原型不做真实登录页，token 由 `web/.env` 注入。
+- 用户端登录为开发演示账号（`VITE_DEMO_USERNAME` / `VITE_DEMO_PASSWORD`），token 仍由 `web/.env` 注入。
 
 ## 3. 用户端页面
 
-### 3.1 知情同意页 `/consent`
+### 3.1 知情同意页 `/consent`（v1.2 补记 7 起已合并至登录页 `/login`，本节仅保留历史契约）
+
+> 现行实现见补记 7：单一统一勾选、登录后一次提交；本节「独立勾选」与「禁止折叠」条款已废止。
 
 **目的**：进入用户端后**首次一次性授权**（原型以 token 注入视同登录），明确采集范围、用途与撤回方式；授权有效期内再次进入 `/capture` 不再要求同意，撤回后需重新授权。
 
@@ -169,8 +184,9 @@
 | 会话时间线 | 按 `captured_at` 倒序，显示 `capture_status`、`analysis_status`、色码 |
 | 记录检索 | 时间范围、色码筛选 |
 | 敏感内容 | 面部图、转写原文默认折叠，点击展开并调用留痕接口 |
+| 思想汇报同步（2026-11-25 新增） | 「同步思想汇报」按钮调用 `POST /api/admin/subjects/{id}/sensevoice-sync`；下方列表展示 `data_version`、情绪类型/置信度、操作人、时间；点击「查看完整报告」调 `GET /api/admin/sensevoice-syncs/{sync_id}`（留痕）并展开转写全文、情绪类型、置信度、关键触发片段。能力未启用时显示中性提示「同步能力未启用，请联系管理员」，**不得展示伪造的转写或情绪结果** |
 
-### 4.3 状态看板 `/admin/dashboard`
+### 4.3 状态看板 `/admin/dashboard`（补记 9 起已合并进对象详情，本节仅保留历史契约）
 
 | 区块 | 内容 |
 |---|---|
@@ -306,8 +322,9 @@ type ColorBadgeProps = {
 | `EvidenceTable` | `web/src/admin/Tickets/EvidenceTable.tsx` | 证据链表格 |
 | `SessionTimeline` | `web/src/admin/SubjectDetail/SessionTimeline.tsx` | 会话记录 |
 | `SensitivePanel` | `web/src/components/common/SensitivePanel.tsx` | 折叠敏感字段 + 留痕 |
+| `SensevoiceSyncPanel` | `web/src/admin/SubjectDetail/SensevoiceSyncPanel.tsx` | 思想汇报同步按钮、记录列表、完整报告展开 |
 | `TicketActions` | `web/src/admin/Tickets/TicketActions.tsx` | 三种流转动作与校验 |
-| `TrendStrip` | `web/src/admin/Dashboard/TrendStrip.tsx` | 7 日趋势 |
+| `TrendStrip` | `web/src/admin/SubjectDetail/TrendStrip.tsx` | 7 日趋势（随看板合并迁移，补记 9） |
 
 ## 9. 验收清单
 

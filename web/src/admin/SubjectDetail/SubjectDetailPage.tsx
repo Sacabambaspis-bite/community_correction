@@ -1,13 +1,25 @@
-/* 对象详情页（ui@1.2 §4.2）：对象摘要、双模块频率与最近完成时间。
+/* 对象详情页（ui@1.2 §4.2）：基础信息、状态概览、打卡影像与思想汇报录音、
+ * 双模块频率、会话时间线与敏感内容。
+ * 独立状态看板（ui@1.2 §4.3）已合并到本页，不再提供单独路由。
  * 当前复盘列表仍无查询端点，因此当前结果保留占位，不编造色码。
  */
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { getSessions, getSubject, updateFrequency } from "../../api/admin";
+import {
+  getDashboard,
+  getSessions,
+  getSubject,
+  getSubjectMedia,
+  updateFrequency,
+} from "../../api/admin";
 import type {
   AdminSessionItem,
+  CaptureStatus,
+  DashboardData,
+  Gender,
   SessionKind,
   SubjectDetail,
+  SubjectMediaData,
 } from "../../api/types";
 import { OverdueBadge } from "../OverdueBadge";
 import { SensitivePanel } from "../../components/common/SensitivePanel";
@@ -21,6 +33,8 @@ import { COLOR_META, COLOR_ORDER } from "../../lib/colors";
 import { errorText } from "../../lib/errorMessages";
 import { ApiError } from "../../lib/http";
 import { SessionTimeline } from "./SessionTimeline";
+import { SensevoiceSyncPanel } from "./SensevoiceSyncPanel";
+import { TrendStrip } from "./TrendStrip";
 import styles from "./SubjectDetail.module.css";
 
 const STATUS_TEXT: Record<string, string> = {
@@ -29,7 +43,25 @@ const STATUS_TEXT: Record<string, string> = {
   closed: "已结案",
 };
 
+const GENDER_TEXT: Record<Gender, string> = {
+  male: "男",
+  female: "女",
+  unknown: "未知",
+};
+
+const CAPTURE_STATUS_TEXT: Record<CaptureStatus, string> = {
+  ok: "采集完整",
+  partial: "部分可用",
+  no_face: "未取得面部",
+  no_audio: "未取得声音",
+  no_face_no_audio: "无可用产物",
+  error: "采集异常",
+};
+
 const AUDIT_HINT = "原型：展开动作待接入 audit 留痕接口";
+const MEDIA_AUDIT_HINT = "原型：调阅记录待接入 audit 留痕接口";
+const MEDIA_NOTICE =
+  "影像与音频为 mock 演示数据（录音为合成提示音），接入真实接口前不得用于实际处置。";
 
 function sortByCapturedAtDesc(items: AdminSessionItem[]): AdminSessionItem[] {
   return [...items].sort((left, right) => {
@@ -47,6 +79,21 @@ function formatTime(value: string | null): string {
   return Number.isNaN(date.getTime())
     ? value
     : date.toLocaleString("zh-CN", { hour12: false });
+}
+
+/** 档案字段空值统一显示「未登记」，不编造数据。 */
+function displayText(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === "") {
+    return "未登记";
+  }
+  return String(value);
+}
+
+function dateRangeText(start: string | null, end: string | null): string {
+  if (!start && !end) {
+    return "未登记";
+  }
+  return `${start || "未登记"} 至 ${end || "未登记"}`;
 }
 
 function latestCapturedAt(
@@ -80,6 +127,19 @@ export default function SubjectDetailPage() {
   const [sessions, setSessions] = useState<AdminSessionItem[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
+
+  /* 看板数据独立加载，失败只影响状态概览区块。 */
+  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
+
+  /* 按日期的打卡影像与思想汇报录音。 */
+  const [media, setMedia] = useState<SubjectMediaData | null>(null);
+  const [mediaDate, setMediaDate] = useState("");
+  const [mediaLoading, setMediaLoading] = useState(true);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const [imageFailed, setImageFailed] = useState(false);
+  const [mediaAuditHint, setMediaAuditHint] = useState<string | null>(null);
 
   const [auditHint, setAuditHint] = useState<string | null>(null);
   const [checkinInterval, setCheckinInterval] = useState("1");
@@ -150,6 +210,70 @@ export default function SubjectDetailPage() {
     }
   }, [subjectId]);
 
+  const loadDashboard = useCallback(async () => {
+    if (!subjectId) {
+      setDashboard(null);
+      setDashboardError("缺少对象编号，无法加载状态概览。");
+      setDashboardLoading(false);
+      return;
+    }
+    setDashboardLoading(true);
+    setDashboardError(null);
+    try {
+      const envelope = await getDashboard(subjectId);
+      if (envelope.code !== 0 || envelope.data === null) {
+        setDashboard(null);
+        setDashboardError(errorText(envelope.code, envelope.message));
+        return;
+      }
+      setDashboard(envelope.data);
+    } catch (err) {
+      setDashboard(null);
+      setDashboardError(
+        err instanceof ApiError
+          ? errorText(err.code, err.message)
+          : "网络异常，请检查连接后重试。",
+      );
+    } finally {
+      setDashboardLoading(false);
+    }
+  }, [subjectId]);
+
+  /** 不传日期时由 mock 返回最新日期；切换日期后重新请求。 */
+  const loadMedia = useCallback(
+    async (date?: string) => {
+      if (!subjectId) {
+        setMedia(null);
+        setMediaError("缺少对象编号，无法加载打卡与汇报记录。");
+        setMediaLoading(false);
+        return;
+      }
+      setMediaLoading(true);
+      setMediaError(null);
+      setImageFailed(false);
+      try {
+        const envelope = await getSubjectMedia(subjectId, date);
+        if (envelope.code !== 0 || envelope.data === null) {
+          setMedia(null);
+          setMediaError(errorText(envelope.code, envelope.message));
+          return;
+        }
+        setMedia(envelope.data);
+        setMediaDate(envelope.data.date);
+      } catch (err) {
+        setMedia(null);
+        setMediaError(
+          err instanceof ApiError
+            ? errorText(err.code, err.message)
+            : "网络异常，请检查连接后重试。",
+        );
+      } finally {
+        setMediaLoading(false);
+      }
+    },
+    [subjectId],
+  );
+
   useEffect(() => {
     void loadSubject();
   }, [loadSubject]);
@@ -157,6 +281,14 @@ export default function SubjectDetailPage() {
   useEffect(() => {
     void loadSessions();
   }, [loadSessions]);
+
+  useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
+
+  useEffect(() => {
+    void loadMedia();
+  }, [loadMedia]);
 
   const saveFrequency = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -215,6 +347,14 @@ export default function SubjectDetailPage() {
     }
   };
 
+  const queryMedia = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!mediaDate) {
+      return;
+    }
+    void loadMedia(mediaDate);
+  };
+
   const recentText = (kind: SessionKind): string => {
     if (sessionsLoading) {
       return "正在加载…";
@@ -225,11 +365,21 @@ export default function SubjectDetailPage() {
     return formatTime(latestCapturedAt(sessions, kind)) || "尚未完成";
   };
 
+  const mediaItem = media?.item ?? null;
+  const checkin = mediaItem?.checkin ?? null;
+  const report = mediaItem?.report ?? null;
+  const mediaHasRecord =
+    mediaItem !== null && (checkin !== null || report !== null);
+  const availableDates = media?.available_dates ?? [];
+  const dashboardLastSession = dashboard
+    ? formatTime(dashboard.last_session_at)
+    : "";
+
   return (
     <section>
       <PageTitle
         title="对象详情"
-        description="基础信息、双模块频率、最近完成时间、会话时间线与敏感内容。"
+        description="基础信息、状态概览、打卡影像与思想汇报录音、频率配置、会话时间线与敏感内容。"
         extra={<Link to="/admin/subjects">返回对象列表</Link>}
       />
 
@@ -246,26 +396,279 @@ export default function SubjectDetailPage() {
           <div className={styles.infoGrid}>
             <div className={styles.infoItem}>
               <span className={styles.infoLabel}>编号</span>
-              <span className={styles.infoValue}>{subject.code}</span>
+              <span className={styles.infoValue}>{displayText(subject.code)}</span>
             </div>
             <div className={styles.infoItem}>
               <span className={styles.infoLabel}>姓名</span>
-              <span className={styles.infoValue}>{subject.name}</span>
+              <span className={styles.infoValue}>{displayText(subject.name)}</span>
+            </div>
+            <div className={styles.infoItem}>
+              <span className={styles.infoLabel}>性别</span>
+              <span className={styles.infoValue}>
+                {subject.gender ? GENDER_TEXT[subject.gender] : "未登记"}
+              </span>
+            </div>
+            <div className={styles.infoItem}>
+              <span className={styles.infoLabel}>年龄</span>
+              <span className={styles.infoValue}>
+                {subject.age === null || subject.age === undefined
+                  ? "未登记"
+                  : `${subject.age} 岁`}
+              </span>
+            </div>
+            <div className={styles.infoItem}>
+              <span className={styles.infoLabel}>身份证号</span>
+              <span className={styles.valueWithHint}>
+                <span className={styles.infoValue}>{displayText(subject.id_card)}</span>
+                <span className={styles.fieldHint}>原型演示数据</span>
+              </span>
             </div>
             <div className={styles.infoItem}>
               <span className={styles.infoLabel}>状态</span>
               <span className={styles.infoValue}>
-                {STATUS_TEXT[subject.status] ?? subject.status}
+                {subject.status ? STATUS_TEXT[subject.status] ?? subject.status : "未登记"}
               </span>
             </div>
             <div className={styles.infoItem}>
-              <span className={styles.infoLabel}>同意状态</span>
+              <span className={styles.infoLabel}>联系电话</span>
+              <span className={styles.infoValue}>{displayText(subject.phone)}</span>
+            </div>
+            <div className={styles.infoItem}>
+              <span className={styles.infoLabel}>住址</span>
+              <span className={styles.infoValue}>{displayText(subject.address)}</span>
+            </div>
+            <div className={styles.infoItem}>
+              <span className={styles.infoLabel}>矫正类型</span>
               <span className={styles.infoValue}>
-                对象摘要未返回同意状态
+                {displayText(subject.correction_type)}
+              </span>
+            </div>
+            <div className={styles.infoItem}>
+              <span className={styles.infoLabel}>矫正起止日期</span>
+              <span className={styles.infoValue}>
+                {dateRangeText(subject.start_date, subject.end_date)}
               </span>
             </div>
           </div>
         ) : null}
+      </section>
+
+      <section className={styles.section}>
+        <h2 className={styles.sectionTitle}>状态概览</h2>
+        {dashboardLoading ? <LoadingState text="正在加载状态概览…" /> : null}
+        {!dashboardLoading && dashboardError ? (
+          <ErrorBanner
+            message={dashboardError}
+            onRetry={() => void loadDashboard()}
+          />
+        ) : null}
+        {!dashboardLoading && !dashboardError && !dashboard ? (
+          <EmptyState text="暂无状态概览数据。" />
+        ) : null}
+        {!dashboardLoading && !dashboardError && dashboard ? (
+          <>
+            <div className={styles.dashGrid}>
+              <div className={styles.dashCard}>
+                <h3 className={styles.cardTitle}>五色分布</h3>
+                <div className={styles.distGrid}>
+                  {COLOR_ORDER.map((color) => {
+                    const meta = COLOR_META[color];
+                    const count = dashboard.color_distribution[color] ?? 0;
+                    return (
+                      <div className={styles.distItem} key={color}>
+                        <span
+                          className={styles.swatch}
+                          style={{ background: `var(${meta.token})` }}
+                          aria-hidden="true"
+                        />
+                        <span className={styles.distName}>{meta.label}</span>
+                        <span className={styles.distCount}>{count} 次</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className={styles.cardNote}>
+                  色码统计来自历史复盘结果，每条结论的规则与证据见
+                  <Link
+                    to={`/admin/tickets?subject_id=${encodeURIComponent(dashboard.subject_id)}`}
+                  >
+                    复核队列
+                  </Link>
+                  。
+                </p>
+                <div className={styles.subjectOverdue}>
+                  <OverdueBadge
+                    subjectId={dashboard.subject_id}
+                    overdue={dashboard.overdue}
+                  />
+                </div>
+              </div>
+
+              <div className={styles.dashCard}>
+                <h3 className={styles.cardTitle}>待复核与最近采集</h3>
+                <p className={styles.infoLine}>
+                  待复核：
+                  <Link
+                    to={`/admin/tickets?subject_id=${encodeURIComponent(dashboard.subject_id)}`}
+                  >
+                    {dashboard.pending_tickets} 件
+                  </Link>
+                </p>
+                <p className={styles.infoLine}>
+                  最近采集：{dashboardLastSession || "—"}
+                </p>
+              </div>
+            </div>
+
+            <div className={styles.dashCard}>
+              <h3 className={styles.cardTitle}>近 7 天趋势</h3>
+              <TrendStrip items={dashboard.trend_7d} />
+            </div>
+          </>
+        ) : null}
+      </section>
+
+      <section className={styles.section}>
+        <h2 className={styles.sectionTitle}>打卡与思想汇报</h2>
+        <p className={styles.notice}>
+          按日期查看打卡影像与思想汇报录音。影像与录音默认折叠，展开动作在原型阶段暂不落留痕。
+        </p>
+        <form className={styles.mediaForm} onSubmit={queryMedia}>
+          <label className={styles.filterField}>
+            <span className={styles.filterLabel}>日期</span>
+            <input
+              className={styles.input}
+              type="date"
+              value={mediaDate}
+              disabled={mediaLoading}
+              onChange={(event) => setMediaDate(event.target.value)}
+            />
+          </label>
+          <button
+            className={styles.button}
+            type="submit"
+            disabled={mediaLoading || !mediaDate}
+          >
+            查询
+          </button>
+        </form>
+        {availableDates.length > 0 ? (
+          <div className={styles.dateChips}>
+            <span className={styles.filterLabel}>可用日期：</span>
+            {availableDates.map((date) => (
+              <button
+                key={date}
+                type="button"
+                className={styles.dateChip}
+                aria-pressed={date === mediaDate}
+                disabled={mediaLoading}
+                onClick={() => {
+                  setMediaDate(date);
+                  void loadMedia(date);
+                }}
+              >
+                {date}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {mediaLoading ? <LoadingState text="正在加载打卡与汇报记录…" /> : null}
+        {!mediaLoading && mediaError ? (
+          <ErrorBanner
+            message={mediaError}
+            onRetry={() => void loadMedia(mediaDate || undefined)}
+          />
+        ) : null}
+        {!mediaLoading && !mediaError && media && !mediaHasRecord ? (
+          <EmptyState text="该日期没有打卡或汇报记录" />
+        ) : null}
+
+        {!mediaLoading && !mediaError && mediaHasRecord ? (
+          <div className={styles.mediaGrid}>
+            <div className={styles.mediaCard}>
+              <h3 className={styles.cardTitle}>打卡</h3>
+              {checkin ? (
+                <>
+                  <p className={styles.mediaLine}>
+                    采集时间：{formatTime(checkin.captured_at) || "未记录"}
+                  </p>
+                  <p className={styles.mediaLine}>
+                    采集状态：
+                    {checkin.capture_status
+                      ? CAPTURE_STATUS_TEXT[checkin.capture_status]
+                      : "未记录"}
+                  </p>
+                  {checkin.image_url ? (
+                    <SensitivePanel
+                      title="打卡影像"
+                      onExpand={() => setMediaAuditHint(MEDIA_AUDIT_HINT)}
+                    >
+                      {imageFailed ? (
+                        <p className={styles.mediaEmpty}>
+                          影像加载失败，可稍后重试
+                        </p>
+                      ) : (
+                        <img
+                          className={styles.mediaImage}
+                          src={checkin.image_url}
+                          alt="打卡影像"
+                          loading="lazy"
+                          onError={() => setImageFailed(true)}
+                        />
+                      )}
+                    </SensitivePanel>
+                  ) : (
+                    <p className={styles.mediaEmpty}>该日无影像</p>
+                  )}
+                </>
+              ) : (
+                <p className={styles.mediaEmpty}>该日无打卡记录</p>
+              )}
+            </div>
+
+            <div className={styles.mediaCard}>
+              <h3 className={styles.cardTitle}>思想汇报</h3>
+              {report ? (
+                <>
+                  <p className={styles.mediaLine}>
+                    提交时间：{formatTime(report.submitted_at) || "未记录"}
+                  </p>
+                  <p className={styles.mediaLine}>
+                    时长：
+                    {report.duration_sec === null
+                      ? "未记录"
+                      : `${report.duration_sec} 秒`}
+                  </p>
+                  {report.audio_url ? (
+                    <SensitivePanel
+                      title="思想汇报录音"
+                      onExpand={() => setMediaAuditHint(MEDIA_AUDIT_HINT)}
+                    >
+                      <audio
+                        className={styles.audio}
+                        controls
+                        preload="none"
+                        src={report.audio_url}
+                      />
+                    </SensitivePanel>
+                  ) : (
+                    <p className={styles.mediaEmpty}>该日无录音</p>
+                  )}
+                </>
+              ) : (
+                <p className={styles.mediaEmpty}>该日无思想汇报记录</p>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {mediaAuditHint ? (
+          <p className={styles.auditHint} role="status">
+            {mediaAuditHint}
+          </p>
+        ) : null}
+        <p className={styles.mediaNote}>{MEDIA_NOTICE}</p>
       </section>
 
       <section className={styles.section}>
@@ -364,6 +767,8 @@ export default function SubjectDetailPage() {
         ) : null}
         {!sessionsLoading && !sessionsError ? <SessionTimeline items={sessions} /> : null}
       </section>
+
+      {subject ? <SensevoiceSyncPanel subjectId={subject.subject_id} /> : null}
 
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>记录检索</h2>

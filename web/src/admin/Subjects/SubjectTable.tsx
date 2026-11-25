@@ -96,7 +96,12 @@ export function SubjectTable({
                 <td className={`${styles.td} ${styles.code}`}>{item.code}</td>
                 <td className={styles.td}>
                   <div className={styles.nameCell}>
-                    <span>{item.name}</span>
+                    <Link
+                      className={styles.nameLink}
+                      to={`/admin/subjects/${item.subject_id}`}
+                    >
+                      {item.name}
+                    </Link>
                     <OverdueBadge
                       subjectId={item.subject_id}
                       overdue={item.overdue}

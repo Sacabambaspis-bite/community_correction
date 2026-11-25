@@ -200,3 +200,205 @@
   color: var(--color-text-muted);
   font-size: 13px;
 }
+
+/* ---------- 档案字段 ---------- */
+
+.valueWithHint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.fieldHint {
+  padding: 1px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+/* ---------- 状态概览（原独立看板，已合并进详情） ---------- */
+
+.dashGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.dashCard {
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.cardTitle {
+  margin-bottom: var(--space-3);
+  font-size: 14px;
+  color: var(--color-text-muted);
+}
+
+.cardNote {
+  margin-top: var(--space-3);
+  font-size: 12px;
+  color: var(--color-text-muted);
+  word-break: break-all;
+}
+
+.subjectOverdue {
+  margin-top: var(--space-3);
+}
+
+.infoLine {
+  margin-bottom: var(--space-2);
+  font-size: 14px;
+}
+
+.distGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.distItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.swatch {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 3px;
+}
+
+.distName {
+  font-weight: 600;
+}
+
+.distCount {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.trendStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.trendItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 64px;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.trendDate {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.trendLabel {
+  font-size: 12px;
+}
+
+.trendEmpty {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+/* ---------- 打卡影像与思想汇报录音 ---------- */
+
+.mediaForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+.dateChips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.dateChip {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.dateChip[aria-pressed="true"] {
+  border-color: var(--color-primary);
+  background: var(--color-primary-weak);
+}
+
+.dateChip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.mediaGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+.mediaCard {
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.mediaLine {
+  margin-bottom: var(--space-2);
+  font-size: 14px;
+}
+
+.mediaImage {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.audio {
+  width: 100%;
+}
+
+.mediaEmpty {
+  margin: var(--space-2) 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.mediaNote {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: 12px;
+}

@@ -17,5 +17,41 @@
     { "date": "2026-11-23", "color": "blue" }
   ],
   "pending_tickets": 1,
-  "last_session_at": "2026-11-23T10:12:36+08:00"
+  "last_session_at": "2026-11-23T10:12:36+08:00",
+  "variants": {
+    "7c2a5f18-6d3b-4e9a-9c01-2b3c4d5e6f70": {
+      "subject_id": "7c2a5f18-6d3b-4e9a-9c01-2b3c4d5e6f70",
+      "color_distribution": {
+        "green": 0,
+        "blue": 0,
+        "yellow": 0,
+        "orange": 0,
+        "red": 0
+      },
+      "trend_7d": [],
+      "pending_tickets": 0,
+      "last_session_at": null
+    },
+    "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d": {
+      "subject_id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+      "color_distribution": {
+        "green": 1,
+        "blue": 0,
+        "yellow": 0,
+        "orange": 2,
+        "red": 0
+      },
+      "trend_7d": [
+        { "date": "2026-11-14", "color": "yellow" },
+        { "date": "2026-11-15", "color": "yellow" },
+        { "date": "2026-11-16", "color": "orange" },
+        { "date": "2026-11-17", "color": "orange" },
+        { "date": "2026-11-18", "color": "orange" },
+        { "date": "2026-11-19", "color": "orange" },
+        { "date": "2026-11-20", "color": "orange" }
+      ],
+      "pending_tickets": 2,
+      "last_session_at": "2026-11-20T09:28:00+08:00"
+    }
+  }
 }

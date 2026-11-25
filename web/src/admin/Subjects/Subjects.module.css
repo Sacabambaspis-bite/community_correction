@@ -98,6 +98,10 @@
   min-width: 150px;
 }
 
+.nameLink {
+  font-weight: 600;
+}
+
 .muted {
   color: var(--color-text-muted);
 }

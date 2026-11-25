@@ -3,7 +3,6 @@ import styles from "./AdminLayout.module.css";
 
 const NAV_LINKS = [
   { to: "/admin/subjects", label: "对象列表" },
-  { to: "/admin/dashboard", label: "状态看板" },
   { to: "/admin/tickets", label: "复核队列" },
 ];
 
