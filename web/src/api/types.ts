@@ -277,6 +277,51 @@ export type ReviewDetail = {
   created_at: string;
 };
 
+/* ---------- 用户端 · AI 援助（api@1.5 §7.19–7.20） ---------- */
+
+/** §7.19 可用状态；未配置 Key 时 enabled=false、model=null、notice 为中性提示。 */
+export type AiAssistStatus = {
+  enabled: boolean;
+  web_search: boolean;
+  model: string | null;
+  notice: string | null;
+};
+
+/** 仅允许 user / assistant 两种角色，且最后一条必须为 user。 */
+export type AiChatRole = "user" | "assistant";
+
+export type AiChatMessage = {
+  role: AiChatRole;
+  content: string;
+};
+
+/** §7.20 citation 事件载荷。 */
+export type AiAssistCitation = {
+  index: number;
+  title: string;
+  url: string;
+};
+
+/** §7.20 SSE 事件：event 缺省按 message 处理，未知事件直接忽略。 */
+export type AiAssistEvent =
+  | {
+      type: "meta";
+      request_id: string;
+      model: string | null;
+      web_search: boolean;
+      disclaimer: string;
+    }
+  | { type: "delta"; text: string }
+  | ({ type: "citation" } & AiAssistCitation)
+  | { type: "notice"; code: string; message: string }
+  | {
+      type: "done";
+      finish_reason: string;
+      degraded: string[];
+      request_id: string;
+    }
+  | { type: "error"; code: number; message: string; request_id: string };
+
 /* ---------- 管理端 · 思想汇报同步（api@1.5 §7.15–7.17） ---------- */
 
 /** §7.15 / §7.16 列表项；列表不返回转写与情绪片段。 */

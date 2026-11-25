@@ -1,0 +1,411 @@
+/* AI 援助页样式：复用 tokens.css 的卡片、按钮与间距，移动端单列。
+ * 消息区内部滚动，输入区吸附在页面底部；所有文本允许换行，避免横向滚动。
+ */
+.page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.pageHeader {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 页头常驻的第三方处理提示：中性次级信息，不打断主流程。 */
+.privacyHint {
+  margin-top: calc(var(--space-2) - var(--space-4));
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.backLink:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+/* ---------- 状态提示 ---------- */
+
+.noticeCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.noticeText {
+  color: var(--color-text-muted);
+}
+
+.noticeActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.secondaryButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 14px;
+}
+
+.secondaryButton:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+/* ---------- 对话区 ---------- */
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 220px;
+  max-height: 52vh;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: auto 0;
+  padding: var(--space-2) 0;
+}
+
+.emptyTitle {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.exampleList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.exampleButton {
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  text-align: left;
+  line-height: 1.5;
+}
+
+.exampleButton:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.exampleButton:focus-visible,
+.clearButton:focus-visible,
+.sendButton:focus-visible,
+.stopButton:focus-visible,
+.retryButton:focus-visible,
+.secondaryButton:focus-visible,
+.backLink:focus-visible,
+.textarea:focus-visible,
+.citationLink:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* ---------- 消息气泡 ---------- */
+
+.row {
+  display: flex;
+  width: 100%;
+}
+
+.rowUser {
+  justify-content: flex-end;
+}
+
+.rowAi {
+  justify-content: flex-start;
+}
+
+.bubble {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 86%;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+
+.bubbleUser {
+  background: var(--color-primary-weak);
+  border: 1px solid var(--color-border);
+}
+
+.bubbleAi {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+}
+
+.text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--color-text-muted);
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.inlineNotice,
+.metaNote {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.metaNote {
+  font-style: italic;
+}
+
+.disclaimer {
+  padding-top: var(--space-2);
+  border-top: 1px dashed var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+/* ---------- 气泡内错误与重试 ---------- */
+
+.errorBox {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  background: var(--color-danger-weak);
+  color: var(--color-danger);
+  font-size: 13px;
+}
+
+.retryButton {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+}
+
+/* ---------- 引用来源 ---------- */
+
+.citations {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.citationsTitle {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.citationList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+.citationLink {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.citationDomain {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+/* ---------- 输入区（吸附底部） ---------- */
+
+.composer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.composerHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.composerHint {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.clearButton {
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.clearButton:hover:not(:disabled) {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 84px;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.textarea:disabled {
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+}
+
+.composerFooter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+.counter {
+  margin-right: auto;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sendButton {
+  min-width: 88px;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font-weight: 600;
+}
+
+.sendButton:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.stopButton {
+  min-width: 88px;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  background: var(--color-danger-weak);
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.stopButton:hover {
+  filter: brightness(0.98);
+}
+
+/* ---------- 移动端 ---------- */
+
+@media (max-width: 480px) {
+  .page {
+    padding: var(--space-4) var(--space-3);
+  }
+
+  .messages {
+    max-height: 46vh;
+    padding: var(--space-3);
+  }
+
+  .bubble {
+    max-width: 92%;
+  }
+}

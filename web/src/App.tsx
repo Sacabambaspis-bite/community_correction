@@ -10,6 +10,7 @@ import TicketDetailPage from "./admin/Tickets/Detail/TicketDetailPage";
 import TicketsPage from "./admin/Tickets/TicketsPage";
 import { EntryPage, NotFoundPage } from "./EntryPages";
 import { RequireStaff, RequireUser } from "./lib/guards";
+import AiAssistPage from "./user/AiAssist/AiAssistPage";
 import CapturePage from "./user/Capture/CapturePage";
 import CaptureTasksPage from "./user/Capture/CaptureTasksPage";
 import CheckinPage from "./user/Checkin/CheckinPage";
@@ -56,6 +57,14 @@ export default function App() {
           element={
             <RequireUser>
               <ComingSoonPage />
+            </RequireUser>
+          }
+        />
+        <Route
+          path="/ai-aid"
+          element={
+            <RequireUser>
+              <AiAssistPage />
             </RequireUser>
           }
         />

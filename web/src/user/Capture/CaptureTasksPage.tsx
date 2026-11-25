@@ -37,14 +37,13 @@ const TASK_MODULES: Array<{
 ];
 
 /**
- * 更多服务入口（ui@1.2 补记 5）。
- * 当前阶段仅跳转「功能待开发」占位页，不对接后端、不实现业务逻辑。
+ * 更多服务入口：AI援助直达对话页（ui@1.2 补记 14），教育学习仍为占位页。
  *
  * TODO(可扩展)：AI援助模块后续可扩展三类服务能力——
  *   1) 心理援助：情绪疏导、心理测评与转介；
  *   2) 法律援助：法律咨询、文书指引与援助申请；
  *   3) 就业帮扶：岗位推荐、技能培训与就业指导。
- * 届时在此拆分为独立入口与独立页面，复用本页卡片样式，不改变现有签到/汇报流程。
+ * 届时在独立页面内拆分入口，不改变现有签到/汇报流程。
  */
 const EXTRA_MODULES: Array<{
   key: string;
@@ -56,9 +55,9 @@ const EXTRA_MODULES: Array<{
   {
     key: "ai-aid",
     title: "AI援助",
-    description: "获取心理援助、法律援助与就业帮扶等支持。",
-    to: "/pending?feature=ai-aid",
-    action: "了解详情",
+    description: "心理援助 · 法律援助，提供一般性信息与指引。",
+    to: "/ai-aid",
+    action: "开始咨询",
   },
   {
     key: "education",

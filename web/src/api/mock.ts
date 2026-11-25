@@ -10,6 +10,7 @@ import trendMock from "../mock/trend.json";
 import { SUBJECT_ID } from "../lib/env";
 import type {
   AdminSessionItem,
+  AiAssistStatus,
   CaptureStatus,
   ConsentData,
   DailyMedia,
@@ -586,6 +587,17 @@ export async function mockRequest<T>(
     consentState = { ...consentState, revoked_at: consentState.revoked_at ?? now() };
     saveMockConsent(consentState);
     return ok<T>(consentState);
+  }
+
+  /* 用户端 AI 援助状态（api@1.5 §7.19）：mock 固定「未开通」，不伪造回答。 */
+  if (path === "/api/user/ai-assist/status" && method === "GET") {
+    const data: AiAssistStatus = {
+      enabled: false,
+      web_search: false,
+      model: null,
+      notice: "智能援助暂未开通，请联系工作人员",
+    };
+    return ok<T>(data);
   }
 
   /* ---------- 会话 ---------- */

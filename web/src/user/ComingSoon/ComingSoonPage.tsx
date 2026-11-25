@@ -1,7 +1,7 @@
-/* 功能待开发提示页：AI援助 / 教育学习入口的统一占位页（ui@1.2 补记 5）。
- * 当前阶段不做任何后端请求，仅展示提示并可返回事项选择页。
+/* 功能待开发提示页：仅保留「教育学习」占位（ui@1.2 补记 14）。
+ * `/pending?feature=ai-aid` 已升级为独立页面，此处做旧地址兼容跳转。
  */
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { PageTitle } from "../../components/common/StateViews";
 import styles from "./ComingSoon.module.css";
 
@@ -13,6 +13,9 @@ const FEATURE_TITLES: Record<string, string> = {
 
 export default function ComingSoonPage() {
   const [searchParams] = useSearchParams();
+  if (searchParams.get("feature") === "ai-aid") {
+    return <Navigate to="/ai-aid" replace />;
+  }
   const feature = FEATURE_TITLES[searchParams.get("feature") ?? ""] ?? "该功能";
 
   return (
