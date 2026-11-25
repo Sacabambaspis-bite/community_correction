@@ -4,7 +4,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { createSession, getSession, stopSession } from "../../api/user";
+import { analyzeSession, createSession, getSession, stopSession } from "../../api/user";
 import type { CaptureStatus } from "../../api/types";
 import {
   ErrorBanner,
@@ -92,6 +92,33 @@ export default function CapturePage() {
     [stopPolling, stopRecordingTimer],
   );
 
+  const analyzeCaptured = useCallback(
+    async (id: string, runId: number) => {
+      setPhase("waiting");
+      try {
+        const envelope = await analyzeSession(id);
+        if (!aliveRef.current || runId !== runIdRef.current) {
+          return;
+        }
+        if (envelope.code === 2003) {
+          handleFailure(null, 2003);
+          return;
+        }
+        if (envelope.code !== 0 || envelope.data === null) {
+          handleError(errorText(envelope.code, envelope.message));
+          return;
+        }
+        navigate(`/feedback/${id}`);
+      } catch (error) {
+        if (!aliveRef.current || runId !== runIdRef.current) {
+          return;
+        }
+        handleError(requestErrorText(error));
+      }
+    },
+    [handleError, handleFailure, navigate],
+  );
+
   const pollSession = useCallback(
     async (id: string, runId: number) => {
       try {
@@ -113,7 +140,7 @@ export default function CapturePage() {
         }
         if (envelope.data.status === "captured") {
           stopPolling();
-          navigate(`/feedback/${id}`);
+          await analyzeCaptured(id, runId);
           return;
         }
         if (envelope.data.status === "failed") {
@@ -130,7 +157,7 @@ export default function CapturePage() {
         handleError(requestErrorText(error));
       }
     },
-    [handleError, handleFailure, navigate, stopPolling],
+    [analyzeCaptured, handleError, handleFailure, navigate, stopPolling],
   );
 
   const handleStart = useCallback(async () => {
