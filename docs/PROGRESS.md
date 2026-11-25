@@ -1,11 +1,11 @@
 # 项目进度（PROGRESS）
 
-> 生成时间：2026-11-25 · 基准提交：`f208f2f`（`main` 与 `origin/main` 同步）· 本次提交包含 P12 登录页、P13 思想汇报同步脚手架与 P14 管理端对象详情增强 · 依据：`git log`、`git tag`、`pytest` 实测、[QA 报告](./reports/qa-2026-11-24.md)。
+> 生成时间：2026-11-25 · 基准提交：`62f21c0`（含 P12–P14，`main` 与 `origin/main` 同步）· 工作区增量：P15 管理端本地化与术语统一 · 依据：`git log`、`git tag`、`pytest` 实测、[QA 报告](./reports/qa-2026-11-24.md)。
 > 本文只记录仓库里可核实的事实；尚未实现或未定稿的内容标注「待确认」。
 
 ## 1. 项目定位与技术栈
 
-**一句话**：社区矫正场景的单对象纵向切片原型——把一次采集（人脸 + 语音）转成结构化信号，经四路分析与五色分级，**分级结果唯一出口是人工复核工单**，系统自身不产生处置动作（[prd.md](./prd.md#L20)）。
+**一句话**：社区矫正场景的单对象纵向切片原型——把一次采集（人脸 + 语音）转成结构化信号，经四路分析与五色分级，**分级结果唯一出口是人工复核任务**，系统自身不产生处置动作（[prd.md](./prd.md#L20)）。
 
 | 层 | 选型 | 现状 |
 |---|---|---|
@@ -14,9 +14,9 @@
 | Web 框架 | FastAPI 0.165.0 + uvicorn 0.54.0 | 骨架 + 用户端 / consent / analyze 接入（`api-v1` → `api@1.5` 实现补记） |
 | ORM / 数据库 | SQLAlchemy 2.x（原型阶段手工迁移）/ SQLite | 5 张表已实现（`db-v1`）；本机实际 2.1.9，`requirements` 已锁 `<2.1` |
 | 分析 | Provider 抽象 + 确定性 mock（ASR 可选真实 SenseVoice） | 四路 mock 已实现；`overall.risk_level` 已接 `app.grading.config.map_risk_level`（`c46536e`）；ASR 已接真实 SenseVoice API（env 配置启用，失败回退 Mock，未提交） |
-| 分级 | 五色纯函数规则 + 七日趋势 + 工单草案 | 已实现并接入 analyze / 复盘 / 工单接口（`c46536e`） |
+| 分级 | 五色纯函数规则 + 七日趋势 + 复核任务草案 | 已实现并接入 analyze / 复盘 / 复核任务接口（`c46536e`） |
 | Schema 校验 | jsonschema（Draft 2020-12 + FormatChecker） | 已引入，分析结果强制校验 |
-| 前端 | React + Vite（用户端 / 管理端同仓，按路由分区） | 用户端登录（含同意）+ 采集/反馈 + 管理端列表/详情/工单已实现（`601d33d`；P12 登录页；P14 对象详情档案、按日期媒体、状态概览） |
+| 前端 | React + Vite（用户端 / 管理端同仓，按路由分区） | 用户端登录（含同意）+ 采集/反馈 + 管理端列表/详情/复核任务已实现（`601d33d`；P12 登录页；P14 对象详情档案、按日期媒体、状态概览；P15 全量中文化与术语统一） |
 | 测试 | pytest | 286 条全绿（capture 14 / db 21 / api 74 / analysis 69 / grading 108） |
 
 技术栈来源：[architecture.md](./architecture.md#L11-L21)；采集运行在后端宿主设备而非浏览器（[architecture.md](./architecture.md#L23-L31)）。
@@ -27,7 +27,7 @@
 
 | 阶段 | 时间 | 主线动作 | 交付物 | 追溯 |
 |---|---|---|---|---|
-| P0 契约基线 | 11-23 21:44 | 确立 `app/capture/` 与四份契约初稿，明确「分级只出口工单」边界 | 契约 v1.1 | `7a6f0cf` |
+| P0 契约基线 | 11-23 21:44 | 确立 `app/capture/` 与四份契约初稿，明确「分级只出口复核任务」边界 | 契约 v1.1 | `7a6f0cf` |
 | P1 契约冻结 | 11-23 21:54–21:59 | 关闭 `grading` 的 `partial` 歧义、`ui` 的 `no_face/no_audio` 口径、`api` 降级语义；冻结 v1.2 | `contracts-v1.1`、`contracts-v1.2` | `2003967`、`8698a26` |
 | P2 采集模块 | 11-23 22:09–23:16 | 状态机对齐契约（`coverage`/`warnings`/可选裁剪）；真机验证 `ok/both`；DirectShow 优先、16k 音频 | `app/capture/`、`tests/test_capture/`、`scripts/verify_capture.py`、`scripts/hw_check.py` | `787ee0e`、`55c9a25`（`capture-v1`） |
 | P3 数据层 | 11-23 23:20–23:34 | 五表建模、派生 `coverage`、服务端默认值；`reviews` 窗口唯一 | `app/db/`、db@1.3 | `492c764`、`ddd4968`（`contracts-v1.3`）、`bc83a3e`（`db-v1`） |
@@ -35,15 +35,16 @@
 | P5 QA 修复 | 11-24 00:49–01:02 | M1–M4/L4/L8：锁 SQLAlchemy、FK 测试开关、日志脱敏、可注入 session 工厂、`CAPTURE_FAKE` | QA 报告 + 修复 + 进度快照 | `638245e`、`7732930`、`43d3aba`、`9b2a04d` |
 | P6 分析模块 | 11-24 01:56 | 四路确定性 mock、Schema 校验、一致性判定、运行状态包装层 | `app/analysis/`、`tests/test_analysis/` | `81a8499` |
 | P7 用户端 API | 11-24 08:31 | `/api/user/*`、consent 三闸、会话归属校验（api@1.5） | `app/api/routers/user.py` | `4f5d1bf` |
-| P8 分级与前端骨架 | 11-24 13:24–13:34 | 五色规则、七日趋势、合成封顶、工单草案；前端用户端 3 页 + 管理端 4 页（mock） | `app/grading/`、`tests/test_grading/`、`web/` | `67adee6`、`601d33d`、`337fdb9`、`7782e65` |
-| P9 分析→分级打通 | 11-24 14:18 | `analyze` 正式接入、复盘/工单/看板端点、低一致性强制 P0、契约同步 | `app/api/integration.py`、相关路由 | `1d3fb0e`、`c46536e`、`5eef4bb` |
+| P8 分级与前端骨架 | 11-24 13:24–13:34 | 五色规则、七日趋势、合成封顶、复核任务草案；前端用户端 3 页 + 管理端 4 页（mock） | `app/grading/`、`tests/test_grading/`、`web/` | `67adee6`、`601d33d`、`337fdb9`、`7782e65` |
+| P9 分析→分级打通 | 11-24 14:18 | `analyze` 正式接入、复盘/复核任务/看板端点、低一致性强制 P0、契约同步 | `app/api/integration.py`、相关路由 | `1d3fb0e`、`c46536e`、`5eef4bb` |
 | P10 双模块与手动录音 | 11-24 15:05–15:20 | ① SenseVoice ASR 真实接入（超时回退）② consent 一次性授权、去保存期限 ③ 签到/汇报双模块 + 逾期复核 ④ 思想汇报手动录音 | 见 §3 下表 | `fa5a0d7`、`8013d4e` |
 | P11 用户端入口调整 | 2026-11-24 16:05 | 同意后直达采集页；事项页新增「AI援助」「教育学习」入口与「功能待开发」占位页；文档同步 | `web/src/user/`、`docs/contracts/ui.md`、`README.md` | 见 §2.1 |
 | P12 登录页与同意合并 | 2026-11-25 | 新增 `/login`（用户名 / 密码 / 统一知情同意）；删除独立同意页与组件，旧 `/consent` 仅跳转；演示账号 `张三 / 123456`；守卫改为「登录 + 同意三要素」；默认演示对象改指 seed 的 S001 | `web/src/user/Login/`、`web/src/lib/auth.ts`、`web/src/lib/guards.tsx`、`web/src/App.tsx`、`docs/contracts/ui.md` | 见 §2.2 |
 | P13 思想汇报同步脚手架 | 2026-11-25 | 新增 `sensevoice_syncs` 表与迁移；新增同步/列表/详情三个管理端端点（功能开关默认关闭，失败整体回滚）；新增严格 SenseVoice 转写 + 情绪适配层（无 Mock 回退）；对象详情页新增「思想汇报同步」面板；13 条契约测试 | `app/analysis/sensevoice_sync.py`、`app/db/`、`app/api/`、`web/src/admin/SubjectDetail/`、`docs/contracts/{db,api,ui}.md` | 见 §2.3 |
 | P14 管理端对象详情增强 | 2026-11-25 | 列表姓名跳转详情；详情补基础档案（性别/年龄/身份证号等）；新增按日期查看打卡影像与思想汇报录音（在线预览/播放，敏感面板默认折叠）；状态看板整体合并进详情并下线独立入口 | `web/src/api/`、`web/src/mock/`、`web/src/admin/`、`web/src/App.tsx` | 见 §2.4 |
+| P15 管理端本地化与术语统一 | 2026-11-25 | ① 色码规则、触发规则、证据字段/阈值/取值全部中文化，未知项中性占位；② 移除对象名称下方 UUID；③ 「工单 / 建单」统一改称「复核任务 / 生成任务」，同步五份契约、README、PRD、分级说明与架构文档；④ 修复对象列表「状态 / 最近签到」与复核队列「对象 / 状态」等短文本换行 | `web/src/lib/ruleText.ts`、`web/src/admin/`、`web/src/components/common/ColorBadge.tsx`、`docs/contracts/`、`README.md` | 见 §2.5（工作区） |
 
-**阶段结论**：P0–P10 已形成「采集 → 数据 → 分析 → 分级 → 工单 → 前端」的完整纵向切片并全部提交。P11–P14 为本轮提交的增量（用户端入口、登录页合并同意、思想汇报同步脚手架、管理端对象详情增强），其中 P13 的同步能力因 SenseVoice 服务不可达与情绪接口协议未确认而**默认关闭**，不产生真实同步数据；P14 的媒体与档案字段仍为前端 mock 扩展，契约待补。后端测试总数由 224 增至 286。
+**阶段结论**：P0–P10 已形成「采集 → 数据 → 分析 → 分级 → 复核任务 → 前端」的完整纵向切片并全部提交。P11–P14 已提交（用户端入口、登录页合并同意、思想汇报同步脚手架、管理端对象详情增强），P15 为当前工作区增量（管理端本地化、术语统一与表格换行修复）。其中 P13 的同步能力因 SenseVoice 服务不可达与情绪接口协议未确认而**默认关闭**，不产生真实同步数据；P14 的媒体与档案字段仍为前端 mock 扩展，契约待补；P15 仅调整展示文案与样式，不改接口、状态机与流转规则。后端测试总数由 224 增至 286。
 
 ### 2.1 进度记录：P11 用户端入口与跳转调整
 
@@ -90,6 +91,17 @@
 | 后续待办 | ① 契约补齐：档案字段（含身份证号脱敏与可见范围）、媒体端点（鉴权/留存期/`audit_logs` 留痕）、单对象 dashboard 变体语义<br>② 真实接口联调：影像与音频改为后端返回，替换文生图占位与 2 秒静音 WAV<br>③ 调阅留痕接入后把敏感面板的提示文案改为真实审计状态 |
 | 备注 | 媒体为**演示素材**：影像走文生图占位服务，录音为运行时构造的 2 秒单声道 WAV；不写入 localStorage/IndexedDB，不自动播放；密码、身份证号等敏感信息仅用于原型展示，不可用于生产 |
 
+### 2.5 进度记录：P15 管理端本地化、术语统一与换行修复
+
+| 项 | 内容 |
+|---|---|
+| 完成时间 | 2026-11-25（Asia/Shanghai） |
+| 变更内容 | ① 新增 `web/src/lib/ruleText.ts`：规则编号 → 中文名称、证据字段路径 → 中文、阈值键 → 中文、`low/medium/high` → 低/中/高；色码徽标、触发规则列、证据链统一显示中文，未知项以「其他规则 / 分析字段 / 其他阈值 / —」中性占位<br>② 复核队列对象列与任务详情移除姓名下方的 UUID；筛选占位符改为「请输入对象编号」<br>③ 术语统一：「工单」→「复核任务」、「建单时间」→「生成时间」、「自动建单」→「自动生成」；同步 `ui/api/db/grading/capture` 五份契约、`README.md`、`prd.md`、`grading.md` 与 `architecture.md`<br>④ 修复短文本换行：对象列表「编号 / 状态 / 待复核 / 最近签到 / 最近汇报 / 最近采集」与复核队列「优先级 / 对象 / 任务来源 / 生成时间 / 截止 / 状态」加 `nowrap`，窄屏由横向滚动兜底<br>⑤ 清理固定文案中的 audit / mock / api@1.5 / SenseVoice 等英文，未知状态统一中文兜底 |
+| 完成状态 | 已完成（前端 + 文档）；`npm run typecheck`、`npm run build` 通过；浏览器实测四个管理端页面：短文本单行、档案与日期媒体正常、规则/证据/阈值全中文、全页无「工单」与英文残留、无 console error |
+| 影响范围 | `web/src/lib/ruleText.ts`（新增）、`web/src/components/common/ColorBadge.tsx`、`web/src/admin/{Subjects,Tickets,SubjectDetail,OverdueBadge.tsx}`、`web/src/api/types.ts`（注释）、`web/src/mock/ticket.json`（文案）；`docs/contracts/{ui,api,db,grading,capture}.md` 增加术语同步说明；`README.md` 功能表与详情说明；`docs/{prd,grading,architecture}.md` 术语同步。未改 `app/` 与接口行为，pytest 仍为 286 passed |
+| 后续待办 | ① 补充文本映射的单测与页面快照测试（当前依赖 typecheck/build + 浏览器人工验证）<br>② 档案、媒体、单对象看板的契约缺口仍待补（见 §5）<br>③ 身份证号等敏感字段的脱敏与查看范围需在契约中明确 |
+| 备注 | 规则编号等原始标识仍由接口与审计留痕保存，仅界面不再展示；P0/P1/P2、S001 编号与会话 UUID 属机器标识，保留显示 |
+
 ## 3. 已完成功能模块与交付物
 
 | 对象 | 状态 | 标签 / 提交 |
@@ -108,15 +120,15 @@
 | `app/analysis/` 四路 mock、Schema 校验、一致性判定 | 已实现（未打标签） | `81a8499` |
 | `tests/test_analysis/`（69 条） | 全绿 | `81a8499`、`fa5a0d7` |
 | SenseVoice ASR Provider（真实 API + 10s 超时 + Mock 回退） | 已实现 | `fa5a0d7` |
-| `app/grading/` 五色规则、七日趋势偏移、合成封顶、工单草案 | 已实现并接入 API（未打标签） | `67adee6`、`1d3fb0e` |
+| `app/grading/` 五色规则、七日趋势偏移、合成封顶、复核任务草案 | 已实现并接入 API（未打标签） | `67adee6`、`1d3fb0e` |
 | `tests/test_grading/`（108 条） | 全绿 | `67adee6`、`1d3fb0e` |
 | `web/` 用户端 3 页 + 管理端 4 页骨架（mock 联调） | 已实现 | `601d33d` |
 | consent 一次性授权改版（去保存期限、`retention_days` 可选缺省 180） | 已实现 | `fa5a0d7`、`8013d4e` |
 | 双模块：用户端 `/capture` 选择页 + `/capture/checkin`（face_only）+ `/capture/report` | 已实现 | `fa5a0d7`、`8013d4e` |
-| 双模块后端：`sessions.kind`、频率字段、`GET /api/user/tasks`、`PATCH .../frequency`、逾期 P0 工单（惰性幂等） | 已实现 | `fa5a0d7` |
-| 管理端：频率编辑、最近签到/汇报时间、红色「危机·逾期」徽标、逾期工单中文展示 | 已实现 | `8013d4e` |
+| 双模块后端：`sessions.kind`、频率字段、`GET /api/user/tasks`、`PATCH .../frequency`、逾期 P0 复核任务（惰性幂等） | 已实现 | `fa5a0d7` |
+| 管理端：频率编辑、最近签到/汇报时间、红色「危机·逾期」徽标、逾期复核任务中文展示 | 已实现 | `8013d4e` |
 | 思想汇报手动录音：`stop_event` 采集模式 + `POST /api/sessions/{id}/stop` + 前端正计时无自动终止 | 已实现 | `fa5a0d7`、`8013d4e` |
-| analyze 正式接入 + 复盘 / 工单 / 看板端点 | 已实现 | `c46536e` |
+| analyze 正式接入 + 复盘 / 复核任务 / 看板端点 | 已实现 | `c46536e` |
 | `map_risk_level` wiring + 低一致性 P0 修复 | 已实现 | `c46536e`、`1d3fb0e` |
 | 用户端同意提交后直达 `/capture`，移除中间引导步骤 | 已实现（P11） | 本次提交 |
 | 用户端登录页 `/login`（用户名 / 密码 / 统一知情同意，演示账号 张三 / 123456） | 已实现（P12） | 本次提交 |
@@ -196,7 +208,7 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 - 单次规则：`R_SINGLE_RED`（`intent_flag=suicide_intent` 直接红；`self_harm_mention` 且 `signal_strength>=80` 红，红不受一致性封顶）、`R_SINGLE_ORANGE`（`signal>=70` 且非自杀意图，附 emotion/face 辅助佐证证据）；
 - 趋势规则：`offset_score=(window_mean - baseline_mean)/max(std, BASELINE_MIN_STD)`，`R_TREND_YELLOW/BLUE/GREEN` 边界 `1.5/0.8`，基线或窗口不足走 `R_BASELINE_INSUFFICIENT` 判蓝并在证据标 `insufficient`、`offset_score` 置 0；窗口按自然日可跨月；
 - 合成：取大 → `R_CONSISTENCY_CAP`（low 封顶橙，红豁免；**绿+low 抬至橙**强制复核）→ `manual_review` → `R_DEGRADED_REVIEW` 标 `needs_review`（不改色）；
-- 工单草案：`build_ticket` 只返回 dict（无 DB/通知/处置动作）；绿且不复核抛 `ticket_not_allowed_for_green`；色码→`priority`/`suggested_method`，`due_at` 按 P0/P1/P2 加 24/72/168h，幂等；`manual_review=true`（低一致性）覆写 `priority=P0`、方法按最终色；`capture_degraded` 覆写 P0 + `recapture`；
+- 复核任务草案：`build_ticket` 只返回 dict（无 DB/通知/处置动作）；绿且不复核抛 `ticket_not_allowed_for_green`；色码→`priority`/`suggested_method`，`due_at` 按 P0/P1/P2 加 24/72/168h，幂等；`manual_review=true`（低一致性）覆写 `priority=P0`、方法按最终色；`capture_degraded` 覆写 P0 + `recapture`；
 - 历史遗留 `risk_level` 映射：`config.map_risk_level(text_valence, intent_flag)` 先按 `text_valence` 分段（`[-0.8,-0.5,-0.2,0.0]`→crisis/high/elevated/watch/none），`intent_flag∈{suicide_intent,self_harm_mention}` 强制覆写 `crisis`；**已 wiring 进 `app/analysis/pipeline.py`**（`c46536e`，`pending` 占位已删除）；
 - 阈值唯一来源 `config.py`（15 项均标 `# TODO: 待标定`），`tests/test_grading/test_config.py` 源码扫描保证规则模块无字面量泄漏。
 
@@ -225,15 +237,15 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 | **分析运行状态与结果分离** | [models.py](../app/analysis/models.py)、[pipeline.py](../app/analysis/pipeline.py) | `AnalysisResult` 严格对齐 schema；`done/degraded/failed` 放在独立包装层，失败不产出可进入 grading 的结果 |
 | **`risk_level` 映射落在 grading config 并已 wiring** | [config.py](../app/grading/config.py) `map_risk_level`、[pipeline.py](../app/analysis/pipeline.py) | 按 `text_valence` 分段 + 明确意图覆写 `crisis`；`c46536e` 删除 `pending` 占位，pipeline 直接调用 `map_risk_level` |
 | **一致性阈值权威值在 grading** | [config.py](../app/grading/config.py) `CONSISTENCY_MIN_CONFIDENCE` | grading 侧已定义 0.6；`app/analysis/config.py` 仍用本地常量，迁移时机待定 |
-| **分级为纯函数、只出口工单草案** | `app/grading/*`（`build_ticket` 只返回 dict） | 不读写库/文件/网络，不产生处置动作；色码不进入用户端路径 |
+| **分级为纯函数、只出口复核任务草案** | `app/grading/*`（`build_ticket` 只返回 dict） | 不读写库/文件/网络，不产生处置动作；色码不进入用户端路径 |
 | **`review_reason` 承载规则 8 覆写** | [models.py](../app/grading/models.py)、[ticket.py](../app/grading/ticket.py) | `compose` 签名不增参；`AnalysisResult` 不含 `capture_status`，由 backend 用 `replace(..., review_reason="capture_degraded")` 覆写后建 P0+recapture 单 |
 | **低一致性 P0 由 `manual_review` 驱动** | [ticket.py](../app/grading/ticket.py) | 规则 5 与色码无关；`review_reason="consistency_conflict"` 只描述原因，不改档位 |
 | **复盘窗口按自然日、DB 存 `YYYY-MM-DD`** | [integration.py](../app/api/integration.py)、db@1.4 §4 | 与 grading 证据 `window` 一致；同日多会话共用一个 `window_end`，靠 `UNIQUE(subject_id, window_end)` 幂等 |
-| **0 可用会话在上游拦截** | [admin.py](../app/api/routers/admin.py) `POST /api/admin/reviews` | 「可用会话」= `captured` + `analysis_status∈{done,degraded}`；0 条直接 `1005`，不落库、不建单 |
+| **0 可用会话在上游拦截** | [admin.py](../app/api/routers/admin.py) `POST /api/admin/reviews` | 「可用会话」= `captured` + `analysis_status∈{done,degraded}`；0 条直接 `1005`，不落库、不生成任务 |
 | **analyze 同步完成分析 + 分级** | [sessions.py](../app/api/routers/sessions.py)、[integration.py](../app/api/integration.py) | 原型阶段 mock 分析耗时可接受；省去后台任务与轮询复杂度，失败只用 `analysis_status=failed` 表达 |
 | **consent 一次性授权、不展示保存期限** | ui@1.2 §3.1 补记 2 / 补记 7、api@1.5 §7.1.2、[LoginPage.tsx](../web/src/user/Login/LoginPage.tsx)、[schemas.py](../app/api/schemas.py) | 进入用户端首次授权后，有效期内再采集不再重复询问，撤回后才需重新授权；P12 起面部与语音合并为**单一统一勾选**一次提交；`retention_days` 改可选、缺省 180，仅用于留存管理，用户端不展示不填写 |
 | **签到 face_only 属正常形态，豁免单模态强制规则** | grading@1.2 补记·三、capture@1.2 补记、[pipeline.py](../app/analysis/pipeline.py)、[consistency.py](../app/analysis/consistency.py) | checkin 的 asr/emotion/psych skipped 不计降级；单 face 通道 consistency 中性 medium；不强制 P0/recapture；`map_risk_level(0.0,"none")`；no_face/error 仍按异常 |
-| **逾期 = P0 复核工单 + 管理端危机标记** | api@1.5 补记·二、[integration.py](../app/api/integration.py) | 频率按对象配置（签到默认 1 天、汇报默认 3 天）；管理端读取时惰性判定并幂等建单（`talk_to_staff`、`detail_json.overdue_kind/overdue_days`、初始 `pending`）；不改会话状态、不触发分析；用户端仅中性提示 |
+| **逾期 = P0 复核任务 + 管理端危机标记** | api@1.5 补记·二、[integration.py](../app/api/integration.py) | 频率按对象配置（签到默认 1 天、汇报默认 3 天）；管理端读取时惰性判定并幂等生成任务（`talk_to_staff`、`detail_json.overdue_kind/overdue_days`、初始 `pending`）；不改会话状态、不触发分析；用户端仅中性提示 |
 | **思想汇报录音完全手动控制** | capture@1.2 补记·二、api@1.5 补记·三、ui@1.2 补记 4、[CapturePage.tsx](../web/src/user/Capture/CapturePage.tsx) | 不传 `duration_sec` = 手动模式；100ms 分块录音直到 `stop_event.set()`；无倒计时、无自动终止；stop 幂等且不落库；录音中不轮询（消除「倒计时未完但提前结束」的界面假象）；保存/上传/反馈逻辑不变 |
 
 ## 5. 待办任务与未完成项
@@ -243,9 +255,9 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 | 目录 | 内容 | 状态 |
 |---|---|---|
 | `app/analysis/` | 四路 mock、Schema 校验、一致性判定 | 已实现；ASR 已接 SenseVoice（`fa5a0d7`），emotion/face/psych 真模型待接；`risk_level` 已 wiring `map_risk_level`（`c46536e`） |
-| `app/grading/` | 五色规则、七日趋势偏移、合成封顶、工单草案 | 已实现并接入 API（`c46536e`）；低一致性 P0 已补 |
+| `app/grading/` | 五色规则、七日趋势偏移、合成封顶、复核任务草案 | 已实现并接入 API（`c46536e`）；低一致性 P0 已补 |
 | `app/api/` | analyze / reviews / tickets / dashboard | 已接入（`c46536e`）；余项见下 |
-| `web/` | 用户端页面 + 管理端列表/详情/工单 | 骨架已实现（`601d33d`），双模块与手动录音已落地（`8013d4e`）；P11 新增两个占位入口、P12 登录页、P13 同步面板、P14 详情档案/媒体/看板合并已提交；待与真实 API 联调 |
+| `web/` | 用户端页面 + 管理端列表/详情/复核任务 | 骨架已实现（`601d33d`），双模块与手动录音已落地（`8013d4e`）；P11 新增两个占位入口、P12 登录页、P13 同步面板、P14 详情档案/媒体/看板合并已提交；P15 本地化与术语统一在工作区；待与真实 API 联调 |
 | `web/` · 新增入口后端 | AI援助 / 教育学习 | **未开始**：无接口、无表、无业务逻辑，仅前端占位 |
 
 **API 剩余延期项**
@@ -264,7 +276,7 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 
 **演示数据说明**
 
-- `scripts/seed_demo.py` 生成 6 subjects / 42 sessions / 6 reviews / 3 tickets / 4 audit_logs，颜色（2 绿、1 蓝、1 黄、1 橙、1 红）与工单均为**手工指定**，未调用 `app/grading/`，脚本内无阈值判断；
+- `scripts/seed_demo.py` 生成 6 subjects / 42 sessions / 6 reviews / 3 tickets / 4 audit_logs，颜色（2 绿、1 蓝、1 黄、1 橙、1 红）与复核任务均为**手工指定**，未调用 `app/grading/`，脚本内无阈值判断；
 - `face.jpg` 为 300×300 灰底 + 几何剪影 + `placeholder` 的占位素材，`transcript.txt` 为一行占位文本；二者非真实采集，不得用于效果评估或对外宣称；
 - 既有个别真实采集产物（`storage/subjects/3b1e7c90-...`）保留，seed 不覆盖已存在文件。
 
@@ -280,7 +292,7 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 8. **部署需安装新依赖**：`requirements.txt` 已加入 `jsonschema[format]>=4.23,<5`，本地已安装，其他环境需重新安装。
 9. **文档漂移**：[architecture.md](./architecture.md#L53) 的存储路径仍是 `storage/{subject_id}/{session_id}/`，与 capture@1.2 不一致。
 10. **`capture_busy` 暂复用 `code=5000`**（`message=capture_busy`），尚无专用业务码。
-11. **契约已同步（2026-11-24）**：`grading.md` 补记规则 5 P0、复盘前提、工单主键归属与覆写顺序；`api.md` 补记 analyze / reviews / tickets / dashboard、窗口 `YYYY-MM-DD`、`1005 no_session_in_window`、consent 强校验；`ui.md` §3.1 统一两项齐备；`db.md` 补窗口格式与 0 会话不落库。版本号均保持不变（附加、非破坏）。同日追加：`ui.md` 补记 2（一次性授权、去保存期限）、`api.md` §7.1.2 `retention_days` 可选缺省 180；双模块追加 `ui.md` 补记 3、`api.md` 补记·二、`grading.md` 补记·三、`capture.md` 补记（face_only）、`db.md` 补记（kind/频率/`review_id` 可空/`detail_json`/`talk_to_staff`/`frequency.update`）、`analysis.schema.json` degraded 描述 checkin 例外（已提交）。
+11. **契约已同步（2026-11-24）**：`grading.md` 补记规则 5 P0、复盘前提、复核任务主键归属与覆写顺序；`api.md` 补记 analyze / reviews / tickets / dashboard、窗口 `YYYY-MM-DD`、`1005 no_session_in_window`、consent 强校验；`ui.md` §3.1 统一两项齐备；`db.md` 补窗口格式与 0 会话不落库。版本号均保持不变（附加、非破坏）。同日追加：`ui.md` 补记 2（一次性授权、去保存期限）、`api.md` §7.1.2 `retention_days` 可选缺省 180；双模块追加 `ui.md` 补记 3、`api.md` 补记·二、`grading.md` 补记·三、`capture.md` 补记（face_only）、`db.md` 补记（kind/频率/`review_id` 可空/`detail_json`/`talk_to_staff`/`frequency.update`）、`analysis.schema.json` degraded 描述 checkin 例外（已提交）。
 12. **管理端前端仍用 mock**：`web/src/api/*` 已声明端点，但管理端页面尚未切真实 API（P14 的档案与媒体也仅 mock）；用户端 consent 已完成两项齐备门禁、一次性授权与去保存期限。
 13. **analyze 为同步长请求**：mock 下可接受；ASR 真实 API 已有 10s 超时 + Mock 回退；后续接其余真模型需评估超时或改后台任务，并复用 `deps.get_session_factory()` 注入。
 14. **本机库需执行双模块迁移**：`app/db/migrations/202611241200_add_dual_module_tasks.py`（`python -m app.db.migrations.202611241200_add_dual_module_tasks`）；`storage/app.db` **已执行**该迁移与 P13 的 `202611251200_add_sensevoice_syncs.py`，旧库直接启动会缺 `kind`/频率列/`sensevoice_syncs` 表。
@@ -297,13 +309,13 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 1. **fe-user / fe-admin**：把 `web/src/api/*` 从 mock 切到真实端点；管理端接 `tickets` / `dashboard` / `subjects` 详情与媒体（用户端 consent 门禁与一次性授权已完成）。
 2. **契约补齐（P14 前置）**：在 `db.md` / `api.md` / `ui.md` 定义对象档案字段与身份证号脱敏、`GET /api/admin/subjects/{id}/media` 的鉴权/留存/audit 留痕、单对象 dashboard 语义。
 3. **backend-engineer（余项）**：60 秒频控 `1006`、`capture_busy` 专用码、`GET /api/admin/reviews` 列表、转写查看、档案字段与媒体端点。
-4. **qa-guard + privacy-check**：每轮合并前跑 qa-guard；`c46536e` 新增的 analyze/reviews/tickets 端点涉及心理与工单数据，合并前过 privacy-check。P13 新增同步详情会读取转写原文、P14 档案与影像/录音涉敏感个人信息，合并前同样需过 privacy-check。
+4. **qa-guard + privacy-check**：每轮合并前跑 qa-guard；`c46536e` 新增的 analyze/reviews/tickets 端点涉及心理与复核任务数据，合并前过 privacy-check。P13 新增同步详情会读取转写原文、P14 档案与影像/录音涉敏感个人信息，合并前同样需过 privacy-check。
 5. **P13 启用（待外部条件）**：SenseVoice 与情绪服务恢复 → 配置 `SENSEVOICE_EMOTION_API_URL` 与 `SENSEVOICE_SYNC_ENABLED=1` → 张三真实录制 ≥5 秒汇报 → 管理端详情页点「同步思想汇报」→ 核对转写、情绪类型/置信度/关键片段与审计日志。
 
 ## 7. 三条红线
 
 1. **原图不落盘**：只保留裁剪后的 `face.jpg`，原始帧不落盘、不写日志、不进异常 `detail`（[prd.md](./prd.md#L82)、capture@1.2 §8.1）。
-2. **分级只出口复核工单**：任何非绿结果只生成工单，系统不得产生限制、通报、扣分等动作（[grading.md](./grading.md#L20)）。
+2. **分级只出口复核任务**：任何非绿结果只生成复核任务，系统不得产生限制、通报、扣分等动作（[grading.md](./grading.md#L20)）。
 3. **色码只在管理端**：用户端响应与页面不出现 `final_color` 及任何色码字段，只输出行为建议（[grading.md](./grading.md#L39)、[prd.md](./prd.md#L94)）。
 
 ## 8. 目录所有权（subagent 可写范围）
@@ -340,7 +352,7 @@ python scripts\verify_capture.py --device 0 --seconds 5 --out storage/_debug   #
 git push origin main                                                 # 远程为 ssh.github.com:443（22 端口被阻断）
 ```
 
-测试构成：`tests/test_capture/` 14 条（含 face_only、手动录音 stop_event 闭环与 fake 闭环）、`tests/test_db/` 21 条（含 3 条约束负例、双模块默认值/CHECK/索引/迁移回填）、`tests/test_api/` 74 条（含用户端 / consent / 归属 / 假采集 / 失败 / 并发 / 生产守卫 / analyze 接入 / 复盘 / 工单 / 看板 / retention 缺省 / 双模块 kind / tasks / frequency / 逾期幂等 / 序列化字段 / 手动 stop 全流程与异常分支 / P13 同步 13 条）、`tests/test_analysis/` 69 条（含场景、单模态、降级隔离、Schema、一致性、确定性与隐私、SenseVoice 九项 mock 拦截、checkin 预期 skipped 与一致性豁免）、`tests/test_grading/` 108 条（单次/趋势边界、封顶矩阵、取大六组合、工单字段与 due_at、低一致性 P0、幂等、`map_risk_level`、配置不变量）。
+测试构成：`tests/test_capture/` 14 条（含 face_only、手动录音 stop_event 闭环与 fake 闭环）、`tests/test_db/` 21 条（含 3 条约束负例、双模块默认值/CHECK/索引/迁移回填）、`tests/test_api/` 74 条（含用户端 / consent / 归属 / 假采集 / 失败 / 并发 / 生产守卫 / analyze 接入 / 复盘 / 复核任务 / 看板 / retention 缺省 / 双模块 kind / tasks / frequency / 逾期幂等 / 序列化字段 / 手动 stop 全流程与异常分支 / P13 同步 13 条）、`tests/test_analysis/` 69 条（含场景、单模态、降级隔离、Schema、一致性、确定性与隐私、SenseVoice 九项 mock 拦截、checkin 预期 skipped 与一致性豁免）、`tests/test_grading/` 108 条（单次/趋势边界、封顶矩阵、取大六组合、复核任务字段与 due_at、低一致性 P0、幂等、`map_risk_level`、配置不变量）。
 
 ## 10. 待确认清单
 

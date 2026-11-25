@@ -1,6 +1,6 @@
 # 社区矫正情绪与状态辅助评估系统（原型）
 
-> 单对象纵向切片原型：把一次采集（人脸 + 语音）转成结构化信号，经四路分析与五色分级，**分级结果唯一出口是人工复核工单**。系统自身不产生任何处置动作。
+> 单对象纵向切片原型：把一次采集（人脸 + 语音）转成结构化信号，经四路分析与五色分级，**分级结果唯一出口是人工复核任务**。系统自身不产生任何处置动作。
 
 - 当前状态：原型（非生产可用），核心链路已打通，分析侧除 ASR 外仍为确定性 Mock。
 - 最近验证：`pytest tests -q` → 286 passed；`web` 的 `typecheck` 与 `build` 通过。
@@ -16,14 +16,14 @@
 1. **采集**：刷脸签到（仅人脸）或思想汇报（人脸 + 语音），采集运行在**后端宿主设备**而非浏览器。
 2. **分析**：ASR / 情绪 / 表情 / 心理四路 Provider，产出经 JSON Schema 强校验的结构化结果。
 3. **分级**：五色规则（红 / 橙 / 黄 / 蓝 / 绿）+ 七日趋势偏移 + 一致性封顶，纯函数实现。
-4. **出口**：非绿结果只生成**人工复核工单**，由工作人员线下处置。
+4. **出口**：非绿结果只生成**人工复核任务**，由工作人员线下处置。
 
 ### 三条不可突破的红线
 
 | 红线 | 含义 |
 |---|---|
 | 原图不落盘 | 只保留裁剪后的 `face.jpg`（300×300），原始帧不落盘、不写日志 |
-| 分级只出口工单 | 系统不得产生限制、通报、扣分等任何处置动作 |
+| 分级只出口复核任务 | 系统不得产生限制、通报、扣分等任何处置动作 |
 | 色码只在管理端 | 用户端响应与页面不出现色阶字段，只给行为建议 |
 
 ---
@@ -36,13 +36,14 @@
 | 采集模式 | `both`（人脸+语音）、`face_only`（签到）、手动录音（用户点击结束才停止） | 已实现 |
 | 数据层 | 5 张表、派生 `coverage`、服务端默认值、手工迁移 | 已实现 |
 | 分析 | 四路 Provider + Schema 校验 + 一致性判定 + 降级隔离 | 已实现（ASR 可接真实 SenseVoice） |
-| 分级 | 单次规则、七日趋势、合成封顶、工单草案 | 已实现 |
-| API | 统一响应信封、双 token 鉴权、采集/分析/复盘/工单/看板 | 已实现 |
-| 业务形态 | 刷脸签到、录音思想汇报、按对象配置频率、逾期 → P0 复核工单 | 已实现 |
+| 分级 | 单次规则、七日趋势、合成封顶、复核任务草案 | 已实现 |
+| API | 统一响应信封、双 token 鉴权、采集/分析/复盘/复核任务/看板 | 已实现 |
+| 业务形态 | 刷脸签到、录音思想汇报、按对象配置频率、逾期 → P0 复核任务 | 已实现 |
 | 用户端 | 登录（含统一知情同意）、模块选择、签到、思想汇报、结果反馈 | 已实现（Mock 联调） |
 | 用户端扩展入口 | 「AI援助」「教育学习」两个入口卡片 + 统一「功能待开发」占位页 | **仅前端占位，暂无后端支持** |
-| 管理端 | 对象列表/详情、频率配置、复核工单队列 | 已实现（Mock 联调） |
+| 管理端 | 对象列表/详情、频率配置、复核任务队列 | 已实现（Mock 联调） |
 | 管理端对象详情 | 基础档案（性别/年龄/身份证号等）、按日期查看打卡影像与思想汇报录音（在线预览/播放）、状态概览与七日趋势 | 已实现（Mock 媒体） |
+| 管理端显示规范 | 色码、触发规则、证据字段与阈值全部中文；对象名称下方不显示 UUID；任务类操作统一称「复核任务」 | 已实现 |
 | 状态看板 | 已整体合并进对象详情页，不再保留独立入口；`/admin/dashboard` 仅做重定向 | 已合并 |
 
 ### 刷脸签到与思想汇报的差异
@@ -53,7 +54,7 @@
 | 录音控制 | 无录音 | 用户手动「开始 / 结束」，无倒计时、无自动终止 |
 | 分析通道 | face 正常即 `done`；asr/emotion/psych 的 `skipped` 属预期 | 四路完整分析 |
 | 频率默认值 | 每 1 天 | 每 3 天（管理端可按对象调整） |
-| 逾期处理 | 生成 P0 复核工单 + 管理端红色「危机·逾期」标记 | 同左 |
+| 逾期处理 | 生成 P0 复核任务 + 管理端红色「危机·逾期」标记 | 同左 |
 
 ---
 
@@ -80,7 +81,7 @@ community-correction/
 │  ├─ db/                   # ORM 模型、连接、建库、手工迁移
 │  ├─ analysis/             # 四路 Provider、Schema 校验、一致性
 │  │  └─ providers/         # mock_asr / mock_emotion / mock_face / mock_psych / sensevoice_asr
-│  ├─ grading/              # 五色规则、趋势、合成、工单草案（纯函数）
+│  ├─ grading/              # 五色规则、趋势、合成、复核任务草案（纯函数）
 │  └─ api/                  # FastAPI 应用、路由、依赖、错误信封、集成层
 │     └─ routers/           # health / sessions / user / admin
 ├─ web/
@@ -293,7 +294,7 @@ curl.exe -X POST "http://127.0.0.1:8000/api/sessions/<session_id>/analyze" -H "A
 ### 8.3 管理端常用操作
 
 ```powershell
-# 对象列表（同时惰性生成逾期 P0 工单）
+# 对象列表（同时惰性生成逾期 P0 复核任务）
 curl.exe "http://127.0.0.1:8000/api/admin/subjects" -H "Authorization: Bearer admin_demo"
 
 # 修改某对象的签到/汇报频率（至少一项，整数 ≥1）
@@ -301,7 +302,7 @@ curl.exe -X PATCH "http://127.0.0.1:8000/api/admin/subjects/<subject_id>/frequen
   -H "Authorization: Bearer admin_demo" -H "Content-Type: application/json" `
   -d '{\"checkin_interval_days\":1,\"report_interval_days\":3}'
 
-# 复核工单列表 / 工单流转
+# 复核任务列表 / 复核任务流转
 curl.exe "http://127.0.0.1:8000/api/admin/tickets" -H "Authorization: Bearer admin_demo"
 curl.exe -X POST "http://127.0.0.1:8000/api/admin/tickets/<ticket_id>/transition" `
   -H "Authorization: Bearer admin_demo" -H "Content-Type: application/json" `
@@ -324,8 +325,8 @@ curl.exe -X POST "http://127.0.0.1:8000/api/admin/tickets/<ticket_id>/transition
 | `/admin/subjects` | 对象列表 | 最近签到/汇报时间、逾期徽标 |
 | `/admin/subjects/:subjectId` | 对象详情 | 基础档案、按日期影像/录音、五色分布与趋势、频率编辑、会话时间线 |
 | `/admin/dashboard` | 旧看板地址 | 独立看板已合并进对象详情，访问即跳转 `/admin/subjects` |
-| `/admin/tickets` | 复核队列 | 工单列表 |
-| `/admin/tickets/:ticketId` | 工单详情 | 证据、逾期来源、流转操作 |
+| `/admin/tickets` | 复核队列 | 复核任务列表 |
+| `/admin/tickets/:ticketId` | 复核任务详情 | 证据、逾期来源、流转操作 |
 
 ### 8.5 新增入口说明（暂无后端支持）
 
@@ -352,11 +353,11 @@ curl.exe -X POST "http://127.0.0.1:8000/api/admin/tickets/<ticket_id>/transition
 |---|---|---|
 | 基础档案 | 姓名、编号、状态、性别、年龄、身份证号、联系电话、住址、矫正类别与起止日期 | `GET /api/admin/subjects/{id}`（mock 扩展 `profiles`） |
 | 打卡与思想汇报 | 选择日期后展示该日打卡影像与思想汇报录音；影像内联预览、录音原生播放；另提供该对象有记录的日期快捷按钮 | `GET /api/admin/subjects/{id}/media?date=YYYY-MM-DD`（mock） |
-| 状态概览 | 五色分布、近 7 天趋势、待复核工单数、最近采集与「危机·逾期」标记 | `GET /api/admin/dashboard?subject_id=...`（mock `variants`） |
+| 状态概览 | 五色分布、近 7 天趋势、待复核任务数、最近采集与「危机·逾期」标记 | `GET /api/admin/dashboard?subject_id=...`（mock `variants`） |
 
 交互与隐私约定：
 
-- 媒体统一放入敏感面板（`SensitivePanel`），**默认折叠**，展开时提示「调阅记录待接入 audit 留痕」；不写入浏览器持久化存储，不自动播放。
+- 媒体统一放入敏感面板（`SensitivePanel`），**默认折叠**，展开时提示「调阅记录待接入审计留痕」；不写入浏览器持久化存储，不自动播放。
 - 日期筛选与状态概览并行加载，任一失败只影响对应区块，不影响档案展示。
 - 状态概览与原独立看板内容一致，原 `/admin/dashboard` 与导航入口均已下线。
 
@@ -385,9 +386,9 @@ python scripts\seed_demo.py            # 幂等写入
 python scripts\seed_demo.py --reset    # 清空后重建
 ```
 
-生成 6 个对象、42 条会话、6 份复盘、3 张工单及审计记录。
+生成 6 个对象、42 条会话、6 份复盘、3 条复核任务及审计记录。
 
-> 演示数据的色阶与工单均为**手工指定**，未调用分级规则；`face.jpg` 与 `transcript.txt` 是占位素材，**不得用于效果评估或对外宣称**。
+> 演示数据的色阶与复核任务均为**手工指定**，未调用分级规则；`face.jpg` 与 `transcript.txt` 是占位素材，**不得用于效果评估或对外宣称**。
 
 ---
 
@@ -477,9 +478,9 @@ npm run build
 </details>
 
 <details>
-<summary><b>Q9：为什么记录里有工单，但没有任何"处置"？</b></summary>
+<summary><b>Q9：为什么记录里有复核任务，但没有任何"处置"？</b></summary>
 
-这是产品红线：分级结果唯一出口是人工复核工单，系统不执行限制、通报、扣分等动作，最终判断由工作人员线下完成。
+这是产品红线：分级结果唯一出口是人工复核任务，系统不执行限制、通报、扣分等动作，最终判断由工作人员线下完成。
 
 </details>
 
@@ -505,7 +506,8 @@ npm run build
 | AI援助 / 教育学习 | 仅前端入口与「功能待开发」占位页，**无后端接口、无业务逻辑、无数据留存** |
 | 用户登录 | 开发阶段演示账号（前端校验，密码会进入打包产物），**非真实身份认证**；生产需接入真实用户体系 |
 | 管理端档案字段 | 性别 / 年龄 / 身份证号 / 住址等由前端 mock 扩展，`db` / `api` 契约尚未定义；身份证号目前明文展示，接入真实接口前需补脱敏与权限规则 |
-| 管理端媒体预览 | 打卡影像为文生图占位、录音为运行时生成的 2 秒静音 WAV；媒体端点、鉴权、留存期与 audit 留痕未入契约，暂不可用于真实调阅 |
+| 管理端媒体预览 | 打卡影像为文生图占位、录音为运行时生成的 2 秒静音 WAV；媒体端点、鉴权、留存期与审计留痕未入契约，暂不可用于真实调阅 |
+| 管理端文案映射 | 规则编号、证据字段与阈值键由前端映射为中文；后端新增未收录项会显示「其他规则 / 分析字段 / 其他阈值」，需同步维护 `web/src/lib/ruleText.ts` |
 | 状态看板 | 已合并进对象详情，独立页面与导航入口已移除 |
 
 ---
@@ -516,7 +518,7 @@ npm run build
 |---|---|
 | [docs/prd.md](./docs/prd.md) | 产品定位、用户、边界与不做清单 |
 | [docs/architecture.md](./docs/architecture.md) | 分层架构、数据流、存储与部署形态 |
-| [docs/grading.md](./docs/grading.md) | 五色分级规则与工单策略 |
+| [docs/grading.md](./docs/grading.md) | 五色分级规则与复核任务策略 |
 | [docs/contracts/capture.md](./docs/contracts/capture.md) | 采集契约（状态机、目录、裁剪、模式） |
 | [docs/contracts/db.md](./docs/contracts/db.md) | 表结构、约束、索引与迁移约定 |
 | [docs/contracts/api.md](./docs/contracts/api.md) | 端点、信封、错误码、鉴权 |

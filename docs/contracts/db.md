@@ -11,7 +11,9 @@
 
 > **v1.5 实现补记（2026-11-25，附加、非破坏）**：新增 `sensevoice_syncs` 表，保存「思想汇报音频 → SenseVoice 转写 + 情绪分析」的同步结果（见 §7）；`audit_logs.action` 新增 `sensevoice.sync`、`target_type` 新增 `sensevoice_sync`。表结构、接口与前端面板先落地，真实调用由 `SENSEVOICE_SYNC_ENABLED` 开关控制，默认关闭。`sessions.transcript_path` / `analysis_json` 的存储约定不变，同步表不替代它们。
 
-> **v1.4 实现补记（2026-11-24，附加、非破坏）**：为「刷脸签到 / 录音思想汇报」双模块新增——`subjects.checkin_interval_days`（默认 1）、`subjects.report_interval_days`（默认 3）；`sessions.kind`（`checkin`/`report`，默认 `report`，存量数据即思想汇报等价语义）。签到/汇报逾期判定只读取，不改会话状态；逾期以 P0 复核工单表达（见 api.md 补记）。实现驱动追加：`review_tickets.review_id` 改为**可空**（逾期等无复盘关联的工单为 NULL，`UNIQUE(review_id)` 对 NULL 不冲突）；`review_tickets` 新增可空 JSON `detail_json`（逾期工单记录 `overdue_kind` / `overdue_days`）；`suggested_method` 新增 `talk_to_staff`；`audit_logs.action` 新增 `frequency.update`。逾期工单初始状态沿用 `pending`，不新增状态值。
+> **v1.4 实现补记（2026-11-24，附加、非破坏）**：为「刷脸签到 / 录音思想汇报」双模块新增——`subjects.checkin_interval_days`（默认 1）、`subjects.report_interval_days`（默认 3）；`sessions.kind`（`checkin`/`report`，默认 `report`，存量数据即思想汇报等价语义）。签到/汇报逾期判定只读取，不改会话状态；逾期以 P0 复核任务表达（见 api.md 补记）。实现驱动追加：`review_tickets.review_id` 改为**可空**（逾期等无复盘关联的复核任务为 NULL，`UNIQUE(review_id)` 对 NULL 不冲突）；`review_tickets` 新增可空 JSON `detail_json`（逾期复核任务记录 `overdue_kind` / `overdue_days`）；`suggested_method` 新增 `talk_to_staff`；`audit_logs.action` 新增 `frequency.update`。逾期复核任务初始状态沿用 `pending`，不新增状态值。
+
+> **术语同步（2026-11-25，编辑器、无版本变更）**：中文表述统一为「复核任务」；表名 `review_tickets`、字段 `ticket_*` 与状态枚举保持不变。
 
 ---
 
@@ -143,7 +145,7 @@ pending ──分析成功且无降级──> done
 | `no_face_no_audio` | `failed` | 否 |
 | `error` | `failed` | 否 |
 
-> 判定规则：只要 `face_path` 或 `audio_path` 任一存在即可进入 `captured`，因此 `partial` / `no_face` / `no_audio` 均可被分析；失败会话保留 `meta.json` 便于排查，不进分析、不计入复盘、不生成工单（详见 [capture.md](./capture.md) 3.2）。分析失败只把 `analysis_status` 置 `failed`，`sessions.status` 保持 `captured`。
+> 判定规则：只要 `face_path` 或 `audio_path` 任一存在即可进入 `captured`，因此 `partial` / `no_face` / `no_audio` 均可被分析；失败会话保留 `meta.json` 便于排查，不进分析、不计入复盘、不生成复核任务（详见 [capture.md](./capture.md) 3.2）。分析失败只把 `analysis_status` 置 `failed`，`sessions.status` 保持 `captured`。
 
 ### 3.2 `analysis_json` 存放约定
 
@@ -181,12 +183,12 @@ pending ──分析成功且无降级──> done
 - 窗口内 0 条**可用分析会话**（`sessions.status = captured` 且 `analysis_status in (done, degraded)`）时不落 `reviews`，复盘接口返回 `1005 no_session_in_window`；
 - 有可用会话但无 `psych.status = ok` 样本时（如 `no_audio`）仍可落 `reviews`，趋势走 `R_BASELINE_INSUFFICIENT` 判蓝（见 [../grading.md §4.3](../grading.md)）。
 
-## 5. `review_tickets`（复核工单）
+## 5. `review_tickets`（复核任务）
 
 | 字段 | 类型 | 约束 | 说明 |
 |---|---|---|---|
 | `id` | TEXT | PK | UUID v4 |
-| `review_id` | TEXT | NULL, FK → `reviews.id`, UNIQUE | 复盘来源工单指向 `reviews.id`；逾期等无复盘关联的工单为 NULL（2026-11-24 起可空） |
+| `review_id` | TEXT | NULL, FK → `reviews.id`, UNIQUE | 复盘来源复核任务指向 `reviews.id`；逾期等无复盘关联的复核任务为 NULL（2026-11-24 起可空） |
 | `subject_id` | TEXT | NOT NULL, FK → `subjects.id` | |
 | `status` | TEXT | NOT NULL, CHECK in (`pending`,`confirmed`,`corrected`,`closed`) | 见 5.1 |
 | `priority` | TEXT | NOT NULL, CHECK in (`P0`,`P1`,`P2`) | 见 [../grading.md](../grading.md#6-复核触发条件) |
@@ -197,13 +199,13 @@ pending ──分析成功且无降级──> done
 | `assignee` | TEXT | NULL | 处理人工号 |
 | `conclusion_color` | TEXT | NULL, CHECK in (`green`,`blue`,`yellow`,`orange`,`red`) | 人工结论色 |
 | `conclusion_note` | TEXT | NULL | 人工说明 |
-| `detail_json` | TEXT | NULL, JSON | 工单附加细节；逾期工单记录 `overdue_kind`（`checkin`/`report`）与 `overdue_days`；不含转写原文、评分明细等敏感内容 |
+| `detail_json` | TEXT | NULL, JSON | 复核任务附加细节；逾期复核任务记录 `overdue_kind`（`checkin`/`report`）与 `overdue_days`；不含转写原文、评分明细等敏感内容 |
 | `opened_at` | TEXT | NOT NULL | |
 | `closed_at` | TEXT | NULL | |
 
-> `id` 为工单主键（UUID v4，由 API 层生成）；`review_id` 指向 `reviews.id`。`grading.build_ticket` 的输出只提供后者，不含 `id`。
+> `id` 为复核任务主键（UUID v4，由 API 层生成）；`review_id` 指向 `reviews.id`。`grading.build_ticket` 的输出只提供后者，不含 `id`。
 
-### 5.1 工单状态机
+### 5.1 复核任务状态机
 
 ```
 pending ──confirm──> confirmed ──(自动)──> closed
@@ -219,7 +221,7 @@ pending ──confirm──> confirmed ──(自动)──> closed
 | `close` | 无需处理 / 重复 / 信息不足 | `note` | `closed` |
 
 - 终态 `closed` 记录 `closed_at`；
-- 已 `closed` 的工单不允许再次流转，返回 `1005 状态冲突`；
+- 已 `closed` 的复核任务不允许再次流转，返回 `1005 状态冲突`；
 - 每次流转写一条 `audit_logs`（`action=ticket.transition`）。
 
 ### 5.2 `suggested_method` 取值
@@ -255,7 +257,7 @@ pending ──confirm──> confirmed ──(自动)──> closed
 | `consent.revoke` | 撤回 |
 | `sensitive.view` | 查看面部图 / 转写原文 |
 | `session.analyze` | 触发分析 |
-| `ticket.transition` | 工单流转 |
+| `ticket.transition` | 复核任务流转 |
 | `subject.update` | 对象信息修改 |
 | `review.create` | 复盘创建 |
 | `frequency.update` | 管理端修改对象签到/汇报频率（2026-11-24 新增） |
@@ -328,7 +330,7 @@ pending ──confirm──> confirmed ──(自动)──> closed
 | `reviews` | `(final_color)` | 看板色码分布 |
 | `reviews` | `UNIQUE(subject_id, window_end)` | 同一窗口防重复生成 |
 | `review_tickets` | `(status, priority, opened_at DESC)` | 复核队列排序 |
-| `review_tickets` | `(subject_id)` | 对象工单 |
+| `review_tickets` | `(subject_id)` | 对象复核任务 |
 | `review_tickets` | `UNIQUE(review_id)` | 一次复盘只开一张单，保证幂等 |
 | `audit_logs` | `(target_type, target_id, created_at DESC)` | 溯源 |
 | `audit_logs` | `(actor_id, created_at DESC)` | 人员操作审计 |

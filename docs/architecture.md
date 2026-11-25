@@ -46,7 +46,7 @@
 ├───────────────────────────────────────────────────────────────┤
 │  app/capture/    抓拍 · 人脸检测裁剪 · 录音 · 会话打包           │
 │  app/analysis/   四路 Provider · 汇总 · 一致性判定              │
-│  app/grading/    规则表 · 合成 · 工单草案生成                   │
+│  app/grading/    规则表 · 合成 · 复核任务草案生成                   │
 └───────────────────────────┬───────────────────────────────────┘
                             │
 ┌───────────────────────────▼───────────────────────────────────┐
@@ -63,9 +63,9 @@ api  →  db
 grading 不反向依赖 analysis（只消费已校验的 AnalysisResult）
 ```
 
-- `analysis` 只吐结构化的 `AnalysisResult`，不写库、不建单；
-- `grading` 是纯函数集合，输入 `AnalysisResult` 与历史窗口数据，输出分级与工单草案；
-- `api` 是唯一编排者，负责落库、建单、留痕、序列化脱敏；
+- `analysis` 只吐结构化的 `AnalysisResult`，不写库、不生成任务；
+- `grading` 是纯函数集合，输入 `AnalysisResult` 与历史窗口数据，输出分级与复核任务草案；
+- `api` 是唯一编排者，负责落库、生成任务、留痕、序列化脱敏；
 - `capture` 不感知任何模型与规则。
 
 ## 3. 端到端时序（一次完整会话）
@@ -102,7 +102,7 @@ grading 不反向依赖 analysis（只消费已校验的 AnalysisResult）
 1. `POST /api/session` 同步执行采集，最长阻塞 `CAPTURE_TIMEOUT_SEC`（默认 60s）。原型不做异步任务队列。
 2. `POST /api/session/{id}/analyze` 只在 `session.status == captured` 时可用，否则返回 `1005 状态冲突`。
 3. 分析结果必须通过 `analysis.schema.json` 校验后才允许进入 `grading`；校验失败按 `5000` 处理并记日志（不含原文）。
-4. 分级结果与工单在**同一个事务**内写入，避免出现"有颜色无工单"的中间态。
+4. 分级结果与复核任务在**同一个事务**内写入，避免出现"有颜色无复核任务"的中间态。
 
 ## 4. Provider 抽象
 
@@ -153,7 +153,7 @@ mock 输出必须**可通过场景参数切换**（如 `MOCK_SCENARIO=normal|neg
 |---|---|
 | 单路 `available()` 为 False | 该路 `status=skipped`，整体 `degraded=true` |
 | 单路抛异常 | 该路 `status=degraded` + `reason`，整体 `degraded=true`，继续汇总 |
-| 四路全部失败 | 返回 `5000`，不生成分级、不建单 |
+| 四路全部失败 | 返回 `5000`，不生成分级、不生成任务 |
 | 超过单路超时（默认 10s） | 按 `degraded` 处理并终止该路 |
 
 `degraded=true` 时仍走分级，但 `consistency` 最多为 `medium`，且强制 `needs_review=true`。
@@ -189,7 +189,7 @@ storage/
 
 `subjects` / `sessions` / `reviews` / `review_tickets` / `audit_logs`，字段定义见 [contracts/db.md](./contracts/db.md)。
 
-> 注：`trae/agents/README.md` 中写的是 4 张表，本设计经评审确认为 5 张，增补 `audit_logs`，理由是敏感字段查看与工单流转必须可追溯。
+> 注：`trae/agents/README.md` 中写的是 4 张表，本设计经评审确认为 5 张，增补 `audit_logs`，理由是敏感字段查看与复核任务流转必须可追溯。
 
 ### 6.3 分析结果存放
 
@@ -200,7 +200,7 @@ storage/
 | 端 | Header | 角色 | 可访问 |
 |---|---|---|---|
 | 用户端 | `Authorization: Bearer <user_token>` | `subject` | 本人同意、采集、本人反馈 |
-| 管理端 | `Authorization: Bearer <admin_token>` | `staff` | 对象、会话、复盘、工单、看板 |
+| 管理端 | `Authorization: Bearer <admin_token>` | `staff` | 对象、会话、复盘、复核任务、看板 |
 | 采集触发 | 同上 | `subject` \| `staff` | 仅本机终端 |
 
 - 用户端接口的序列化层**必须显式剔除** `final_color`、`risk_level`、`evidence`；
@@ -222,7 +222,7 @@ storage/
 |---|---|
 | `consent.grant` / `consent.revoke` | 同意、撤回 |
 | `sensitive.view` | 查看面部图、转写原文 |
-| `ticket.transition` | 工单确认 / 修正 / 关闭 |
+| `ticket.transition` | 复核任务确认 / 修正 / 关闭 |
 | `session.analyze` | 触发分析 |
 | `review.export_evidence` | 导出证据（如后续需要） |
 
@@ -272,7 +272,7 @@ npm run dev
 | 类别 | 要求 |
 |---|---|
 | 可解释性 | 每个非绿结果携带 `rule_id` + `field_path` + `observed_value` + `threshold` + `session_id` |
-| 幂等性 | 同一 `session_id` 重复调用 `/analyze` 返回已有结果，不重复建单 |
+| 幂等性 | 同一 `session_id` 重复调用 `/analyze` 返回已有结果，不重复生成任务 |
 | 可测试性 | 采集与分析必须支持假数据注入，测试不依赖真实设备与真模型 |
 | 响应时间 | 分析（mock）单会话 < 1s；管理端列表接口 < 300ms（1000 条内） |
 | 数据清理 | `RETENTION_DAYS` 默认 180，超期由清理任务删除文件与记录（原型可手动触发） |

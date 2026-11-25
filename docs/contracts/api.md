@@ -16,8 +16,8 @@
 > 2. `POST /api/sessions/{id}/analyze`：`kind=checkin` 时不得因缺音频/单模态覆写 `capture_degraded`（grading@1.2 补记·三），`no_face`/`error` 仍按既有异常处理；`kind=report` 规则不变。
 > 3. 新增 `GET /api/user/tasks`（用户端，subject 归属校验）：返回 `checkin` / `report` 两类任务的 `interval_days`、`last_completed_at`（最近 `captured` 会话的 `captured_at`，无则 null）、`overdue`（bool）。仅行为提示用途，不含色码/分值。
 > 4. 新增 `PATCH /api/admin/subjects/{id}/frequency`（管理端）：body `{checkin_interval_days?, report_interval_days?}`，整数 ≥1，至少一项；写 `audit_logs(action=frequency.update)`。
-> 5. **逾期扫描（惰性、幂等）**：`GET /api/admin/subjects`、`GET /api/admin/subjects/{id}`、`GET /api/admin/dashboard` 调用时对相关对象执行逾期判定（`now - last_completed_at > interval_days`，从未完成过对应类型采集且距 `created_at` 超过频率同样视为逾期）；逾期则生成 P0 复核工单（`suggested_method=talk_to_staff`，`detail_json` 含 `overdue_kind`、`overdue_days`），同对象同类型存在未关闭逾期工单时不重复生成；响应中对象摘要增加 `overdue: {checkin, report}` 布尔标记。逾期判定不修改 `sessions.status`、不触发分析。
-> 6. **序列化补齐（前端联调驱动）**：对象列表/详情返回 `checkin_interval_days`、`report_interval_days`；管理端会话列表项返回 `kind`；工单列表/详情返回 `detail_json`（无附加内容时为 null）。
+> 5. **逾期扫描（惰性、幂等）**：`GET /api/admin/subjects`、`GET /api/admin/subjects/{id}`、`GET /api/admin/dashboard` 调用时对相关对象执行逾期判定（`now - last_completed_at > interval_days`，从未完成过对应类型采集且距 `created_at` 超过频率同样视为逾期）；逾期则生成 P0 复核任务（`suggested_method=talk_to_staff`，`detail_json` 含 `overdue_kind`、`overdue_days`），同对象同类型存在未关闭逾期复核任务时不重复生成；响应中对象摘要增加 `overdue: {checkin, report}` 布尔标记。逾期判定不修改 `sessions.status`、不触发分析。
+> 6. **序列化补齐（前端联调驱动）**：对象列表/详情返回 `checkin_interval_days`、`report_interval_days`；管理端会话列表项返回 `kind`；复核任务列表/详情返回 `detail_json`（无附加内容时为 null）。
 
 > **v1.5 实现补记·三（2026-11-24，附加、非破坏）**：思想汇报录音改为**用户手动控制**——
 > 1. `POST /api/sessions`（`kind=report`）省略 `duration_sec`（或传 null）即进入手动录音模式（capture@1.2 补记·二）；显式传值的定时模式保留兼容。
@@ -30,6 +30,8 @@
 > 3. 同步能力由环境变量 `SENSEVOICE_SYNC_ENABLED` 控制，**默认关闭**；关闭时接口返回 `5001 sensevoice_sync_disabled`，不落库、不写审计。
 > 4. 新增业务码 `2004`（同步失败：`transcription_failed` / `emotion_failed`）、`5001`（外部 AI 能力不可用）。
 > 5. 真实情绪分析接口协议未确认前，只落地表、接口与前端面板；禁止用 Mock 结果冒充真实同步。
+
+> **术语同步（2026-11-25，编辑器、无版本变更）**：中文表述统一为「复核任务」；`review_tickets`、`/api/admin/tickets`、`ticket_id`、`ticket_closed` 等标识与状态枚举保持不变。
 
 ---## 1. 通用约定
 
@@ -94,7 +96,7 @@
 | 1002 | 未认证 | 缺 token 或 token 无效 |
 | 1003 | 无权限 | 用户端 token 访问管理端接口 |
 | 1004 | 资源不存在 | session / subject / review / ticket / 面部图文件不存在 |
-| 1005 | 状态冲突 | 未同意就采集（`consent_revoked` / `consent_required` / `consent_incomplete`）、工单已关闭（`ticket_closed`）、复盘窗口无可用会话（`no_session_in_window`） |
+| 1005 | 状态冲突 | 未同意就采集（`consent_revoked` / `consent_required` / `consent_incomplete`）、复核任务已关闭（`ticket_closed`）、复盘窗口无可用会话（`no_session_in_window`） |
 | 1006 | 频率限制 | 同一对象 60 秒内重复建会话 |
 | 2001 | 采集失败（无可用产物） | `sessions.status == failed`；`failed` 会话调用分析 |
 | 2003 | 分析失败（结果不可用） | `analysis_status=failed`，需重采或人工处理 |
@@ -171,8 +173,8 @@ Authorization: Bearer <token>
 | `GET` | `/api/admin/reviews` | 未实现 | 复盘列表 |
 | `GET` | `/api/admin/reviews/{review_id}` | 已实现 | 复盘详情（含证据链）（见 §7.9） |
 | `GET` | `/api/admin/tickets` | 已实现 | 复核队列（见 §7.12） |
-| `GET` | `/api/admin/tickets/{ticket_id}` | 已实现 | 工单详情（留痕）（见 §7.13） |
-| `POST` | `/api/admin/tickets/{ticket_id}/transition` | 已实现 | 工单流转（见 §7.10） |
+| `GET` | `/api/admin/tickets/{ticket_id}` | 已实现 | 复核任务详情（留痕）（见 §7.13） |
+| `POST` | `/api/admin/tickets/{ticket_id}/transition` | 已实现 | 复核任务流转（见 §7.10） |
 | `GET` | `/api/admin/dashboard` | 已实现 | 看板数据（见 §7.11） |
 | `POST` | `/api/admin/subjects/{subject_id}/sensevoice-sync` | 已实现（默认关闭） | 触发思想汇报转写 + 情绪同步；受 `SENSEVOICE_SYNC_ENABLED` 控制（见 §7.15） |
 | `GET` | `/api/admin/subjects/{subject_id}/sensevoice-syncs` | 已实现 | 同步记录列表（见 §7.16） |
@@ -476,10 +478,10 @@ curl -X POST http://localhost:8000/api/sessions/8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d
 | `status == captured`，分析可用 | `0`，`analysis_status` 为 `done` / `degraded` |
 | 非 `staff` token | `1003` |
 
-- 分析可用时写回 `analysis_json` / `transcript_path`（ASR 成功时）/ `analysis_status`，再按会话所属自然日窗口生成复盘与工单；分析失败只写 `analysis_status=failed`，**不回写** `sessions.status`；
+- 分析可用时写回 `analysis_json` / `transcript_path`（ASR 成功时）/ `analysis_status`，再按会话所属自然日窗口生成复盘与复核任务；分析失败只写 `analysis_status=failed`，**不回写** `sessions.status`；
 - `degraded` 按 §2.1 组装（采集降级 + 分析降级）；
-- 幂等：`analysis_json` 已存在时复用，不重复跑分析；同一 `(subject_id, window_end)` 的复盘已存在时复用，不重复建单；`review_created=false` 表示复用；
-- `ticket_id` 为 `null` 表示未建单（仅「绿 + 不复核 + 非采集降级」会出现）；
+- 幂等：`analysis_json` 已存在时复用，不重复跑分析；同一 `(subject_id, window_end)` 的复盘已存在时复用，不重复生成任务；`review_created=false` 表示复用；
+- `ticket_id` 为 `null` 表示未生成任务（仅「绿 + 不复核 + 非采集降级」会出现）；
 - 每次调用写一条 `audit_logs(action=session.analyze, target_type=session, target_id={session_id})`，`detail_json` 不含转写原文与路径；响应 `degraded` 按 §2.1 组装。
 
 ### 7.5 `GET /api/admin/sessions/{session_id}/face`
@@ -680,13 +682,13 @@ curl -X POST http://localhost:8000/api/admin/tickets/5e2f9b11-3c4d-4a6b-8e7f-0a1
 
 | 动作 | 必填 | 失败返回 |
 |---|---|---|
-| `confirm` | — | 工单已 `closed` → `1005`，`message=ticket_closed` |
+| `confirm` | — | 复核任务已 `closed` → `1005`，`message=ticket_closed` |
 | `correct` | `conclusion_color`、`note` | 缺字段 → `1001`；已 `closed` → `1005 ticket_closed` |
 | `close` | `note` | 缺字段 → `1001`；已 `closed` → `1005 ticket_closed` |
 
 - 单次请求原子落到终态 `closed` 并写 `closed_at`；`confirm` / `correct` 的中间态只体现在 `audit_logs(action=ticket.transition, detail_json.action)`；
 - 每次流转写一条 `audit_logs`：`actor_type=staff`、`actor_id=assignee`（可选）、`action=ticket.transition`、`target_type=ticket`、`target_id={ticket_id}`、`detail_json` 含 `action` / `previous_status` / `conclusion_color` / `note`（`note` 为工作人员结论说明，可入审计；禁止写入音频、转写原文、面部图）；
-- 工单不存在 → `1004`；非 `staff` → `1003`。
+- 复核任务不存在 → `1004`；非 `staff` → `1003`。
 
 ### 7.11 `GET /api/admin/dashboard`
 
@@ -792,7 +794,7 @@ curl "http://localhost:8000/api/admin/tickets?status=pending&priority=P0&subject
 ```
 
 - `evidence` 原样返回 `review_tickets.evidence_json`（可选字段按实际存在返回）；
-- `history` 由 `audit_logs(action=ticket.transition)` 按时间升序组装，并补一条 `opened` / `system` 的建单记录；流转记录的 `actor` 取审计 `actor_id`（即 `assignee`），未提供时回落 `"staff"`；
+- `history` 由 `audit_logs(action=ticket.transition)` 按时间升序组装，并补一条 `opened` / `system` 的生成记录；流转记录的 `actor` 取审计 `actor_id`（即 `assignee`），未提供时回落 `"staff"`；
 - 读取成功前写一条 `audit_logs(action=sensitive.view, target_type=ticket, target_id={ticket_id}, detail_json={"field":"ticket"})`；留痕失败 → `5000 audit_write_failed`，不返回数据；
 - 不存在 → `1004`；非 `staff` → `1003`。
 
@@ -810,9 +812,9 @@ curl "http://localhost:8000/api/admin/tickets?status=pending&priority=P0&subject
 
 - `subject_id` 必填；`window_end` 可选（默认今天，`YYYY-MM-DD`）；`window_days` 可选（默认 7，≥1）；非法 → `1001`；对象不存在 → `1004`；
 - 窗口 `[window_end - (window_days - 1), window_end]`，按自然日；
-- **可用会话** = `sessions.status = captured` 且 `analysis_status in (done, degraded)`；窗口内 0 条 → `1005`、`message=no_session_in_window`，**不落库、不建单**；
+- **可用会话** = `sessions.status = captured` 且 `analysis_status in (done, degraded)`；窗口内 0 条 → `1005`、`message=no_session_in_window`，**不落库、不生成任务**；
 - 有可用会话时，取窗口内 `captured_at` 最新的一条作为 `source_session_id`，执行 `evaluate_session → evaluate_period → compose`；`capture_status in (partial, no_face, no_audio)` 时覆写 `review_reason="capture_degraded"` 后再 `build_ticket`；
-- 同一 `(subject_id, window_end)` 已存在复盘时直接返回该复盘（幂等），不重复建单；
+- 同一 `(subject_id, window_end)` 已存在复盘时直接返回该复盘（幂等），不重复生成任务；
 - 成功写 `audit_logs(action=review.create, target_type=review, target_id={review_id})`。
 
 ### 7.15 `POST /api/admin/subjects/{subject_id}/sensevoice-sync`
@@ -975,5 +977,5 @@ mock 数据必须与本节示例字段完全一致，不得增删字段。
 | 1.4 | 2026-11-23 | 信封改为 `{code,message,data,degraded,request_id}`（中间件 uuid4 + `X-Request-Id` + 日志/audit）；业务码 HTTP 200、未捕获异常 HTTP 500；路由统一为 `/api/sessions` + `/api/admin/*` + `/api/user/*`；`POST /api/sessions` 改异步 + 轮询；新增 `4000`；`5000` 增加 `analysis_pipeline_not_ready` / `capture_busy` 临时语义；鉴权改为 `USER_TOKEN` / `ADMIN_TOKEN`，`APP_ENV=production` 缺配置直接启动失败 |
 | 1.5 | 2026-11-24 | 落地 `/api/user/*`（consent 查询/提交/撤回、feedback）；明确 subject 身份由客户端声明 `subject_id`（GET 走 query、写操作走 body）+ 会话归属校验（越权 `1003`）；`POST /api/sessions` 补齐 consent 三道闸（`revoked` → `general` → `face/audio`），新增 `consent_incomplete`，消除 db.md §2.1 与 api 不一致；`feedback` 在 grading 就绪前用采集状态做中性映射；60s 频控（1006）、analyze 接入、review 查询仍延期 |
 | 1.5（实现补记） | 2026-11-24 | `analyze` 正式接入分析与五色分级（`2003`、幂等、`audit_logs(session.analyze)`）；新增 reviews（POST / GET 详情）、tickets（列表 / 详情 / 流转）、dashboard 契约；复盘窗口统一 `YYYY-MM-DD`；0 可用会话 → `1005 no_session_in_window`；consent 单项授权不可采集（`consent_incomplete`）；60s 频控仍延期 |
-| 1.5（实现补记·二） | 2026-11-24 | 双模块：`POST /api/sessions` 增 `kind`；analyze 按 kind 分流；新增 `GET /api/user/tasks`、`PATCH /api/admin/subjects/{id}/frequency`；管理端读取时惰性幂等生成逾期 P0 工单；`retention_days` 可选缺省 180 |
+| 1.5（实现补记·二） | 2026-11-24 | 双模块：`POST /api/sessions` 增 `kind`；analyze 按 kind 分流；新增 `GET /api/user/tasks`、`PATCH /api/admin/subjects/{id}/frequency`；管理端读取时惰性幂等生成逾期 P0 复核任务；`retention_days` 可选缺省 180 |
 | 1.5（实现补记·四） | 2026-11-25 | 思想汇报同步脚手架：新增 `sensevoice_syncs` 表（db@1.5 §7）与三个管理端端点（§7.15–7.17）；`SENSEVOICE_SYNC_ENABLED` 默认关闭；新增业务码 `2004` / `5001`；读取转写写 `sensitive.view`，同步成功写 `sensevoice.sync` |

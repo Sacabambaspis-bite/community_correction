@@ -40,6 +40,8 @@
 
 > v1.2 实现补记 9（2026-11-25，附加、非破坏）：管理端对象详情增强。① 对象列表「姓名」为详情链接（`/admin/subjects/:subjectId`）；② 详情页新增基础档案（性别、年龄、身份证号、联系电话、住址、矫正类别与起止日期）；③ 新增按日期筛选的「打卡与思想汇报」区块，展示该日打卡影像与思想汇报录音，支持在线预览/播放，媒体统一置于默认折叠的敏感面板；④ 原独立状态看板（§4.3）全部内容合并进对象详情，`/admin/dashboard` 与导航入口下线，旧地址重定向 `/admin/subjects`。档案字段、媒体端点与留痕规则尚待 `db` / `api` 契约补齐；当前原型媒体为演示素材（占位影像 + 2 秒静音 WAV），不得用于真实调阅。
 
+> v1.2 实现补记 10（2026-11-25，附加、非破坏）：管理端界面与相关契约的中文表述统一为「复核任务」——指分级规则命中或逾期后自动生成、由工作人员在复核队列中按优先级与截止时间处理的事项；「任务来源」「生成时间」「自动生成」同步替换原单据化措辞。技术标识 `review_tickets`、`/api/admin/tickets`、`ticket_id` 及状态枚举保持不变，接口语义与流转规则不变。
+
 ---
 
 ## 1. 技术约定
@@ -70,7 +72,7 @@
 | admin | `/admin/subjects/:subjectId` | 对象详情 + 记录检索 | `web/src/admin/SubjectDetail/` |
 | admin | `/admin/dashboard` | 状态看板 | `web/src/admin/Dashboard/` |
 | admin | `/admin/tickets` | 复核队列 | `web/src/admin/Tickets/` |
-| admin | `/admin/tickets/:ticketId` | 工单详情 | `web/src/admin/Tickets/Detail` |
+| admin | `/admin/tickets/:ticketId` | 复核任务详情 | `web/src/admin/Tickets/Detail` |
 
 路由守卫：
 
@@ -205,17 +207,17 @@
 | 对象 | `subject_id` → 姓名 |
 | 当前色码 | `final_color`（带证据入口） |
 | 触发规则 | `triggered_rules` |
-| 建单时间 | `opened_at` |
+| 生成时间 | `opened_at` |
 | 截止 | `due_at`（超期标红） |
 | 状态 | `status` |
 
 筛选：状态、优先级、对象、时间范围。
 
-### 4.5 工单详情 `/admin/tickets/:ticketId`
+### 4.5 复核任务详情 `/admin/tickets/:ticketId`
 
 | 区块 | 内容 |
 |---|---|
-| 基本信息 | 对象、优先级、建单时间、截止时间、建议方式 |
+| 基本信息 | 对象、优先级、生成时间、截止时间、建议方式 |
 | 结论区 | 五色标识 + `rules_fired` + 证据链表格（`field_path` / `observed_value` / `threshold` / `session_id`） |
 | 原始内容 | 面部图、转写原文折叠，展开即留痕 |
 | 操作区 | `确认` / `修正` / `关闭` |
@@ -229,7 +231,7 @@
 | 修正 | `conclusion_color`（必选五色）+ `note`（必填） | 两项都填才能提交 |
 | 关闭 | `note`（必填） | 不得为空 |
 
-**禁止**：一键处置、批量改变对象状态、批量关闭工单。
+**禁止**：一键处置、批量改变对象状态、批量关闭复核任务。
 
 ## 5. 色码展示规则
 
@@ -333,7 +335,7 @@ type ColorBadgeProps = {
 - [ ] 所有 `capture_status` 分支都有对应文案
 - [ ] 管理端任何色码展示都伴随 `rules_fired` 与证据入口
 - [ ] 敏感字段默认折叠，展开触发 `sensitive.view` 留痕
-- [ ] 工单三种动作校验符合第 4.5 节
+- [ ] 复核任务三种动作校验符合第 4.5 节
 - [ ] 无 localStorage / IndexedDB 存储音视频
 - [ ] 所有接口错误码都有可见提示
 - [ ] 不存在一键处置、批量改状态、跨对象排名入口

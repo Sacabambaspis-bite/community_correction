@@ -5,7 +5,7 @@
 | 文档版本 | `grading@1.2` |
 | 状态 | 待评审 |
 | 适用 | 所有实现与前端展示以本文为准 |
-| 工程契约 | [contracts/grading.md](./contracts/grading.md)（函数签名、配置键、工单结构） |
+| 工程契约 | [contracts/grading.md](./contracts/grading.md)（函数签名、配置键、复核任务结构） |
 | 关联 | [prd.md](./prd.md)、[architecture.md](./architecture.md)、[contracts/db.md](./contracts/db.md) |
 
 > v1.2 已冻结，后续仅接受实现驱动的变更。
@@ -17,18 +17,18 @@
 ## 1. 定位与三条原则
 
 1. **分级是提示，不是结论。** 输出的是"建议人工关注的程度"，不是诊断，不是管控等级。
-2. **唯一出口是复核工单。** 任何非绿结果只生成工单，系统不得据此产生限制、通报、扣分等动作。
+2. **唯一出口是复核任务。** 任何非绿结果只生成复核任务，系统不得据此产生限制、通报、扣分等动作。
 3. **无证据不成立。** 每条颜色必须能回答：哪条规则、哪个字段、哪次会话、什么阈值。
 
 ## 2. 五色定义
 
 | 色码 | 名称 | 等级 | 含义 | 来源规则 | 默认动作 |
 |---|---|---|---|---|---|
-| `red` | 红 | 5 | 出现明确的自伤 / 自杀意图信号 | 单次规则 | 当日人工介入（系统只建单） |
+| `red` | 红 | 5 | 出现明确的自伤 / 自杀意图信号 | 单次规则 | 当日人工介入（系统只生成任务） |
 | `orange` | 橙 | 4 | 强烈消极信号但无明确意图；或一致性冲突封顶 | 单次规则 / 合成封顶 | 优先面谈 |
 | `yellow` | 黄 | 3 | 7 日窗口内相对个人基线出现显著恶化偏移 | 趋势规则 | 安排针对性面谈 |
 | `blue` | 蓝 | 2 | 轻度偏移或基线样本不足，需持续观察 | 趋势规则 | 日常问询 |
-| `green` | 绿 | 1 | 无明显偏移 | 趋势规则 | 不做额外动作，不建单 |
+| `green` | 绿 | 1 | 无明显偏移 | 趋势规则 | 不做额外动作，不生成任务 |
 
 **等级顺序（用于合成取大）**：`green < blue < yellow < orange < red`。
 
@@ -108,9 +108,9 @@ offset_score = (window_signal_mean - baseline.psych_signal_mean)
 
 复盘生成的前提是窗口内存在**可用分析会话**：`sessions.status = captured` 且 `analysis_status in (done, degraded)`。
 
-- 窗口内 0 条可用会话：不生成 `reviews` 记录、不建工单，复盘接口返回 `code=1005`、`message=no_session_in_window`；
+- 窗口内 0 条可用会话：不生成 `reviews` 记录、不建复核任务，复盘接口返回 `code=1005`、`message=no_session_in_window`；
 - 趋势偏移的样本仍只统计 `psych.status = ok` 的会话（见 4.1）。因此"有可用会话但无 psych 样本"（如 `no_audio` 导致 psych skipped）时，复盘的 `trend_color` 走 `R_BASELINE_INSUFFICIENT` 判蓝，但 `reviews` 记录仍然生成；
-- 规则 8 的会话（`partial` / `no_face` / `no_audio`）即使没有 psych 样本，也必须生成复核工单（`P0` + `recapture`）。
+- 规则 8 的会话（`partial` / `no_face` / `no_audio`）即使没有 psych 样本，也必须生成复核任务（`P0` + `recapture`）。
 
 > 「可用会话」与「趋势可用样本」不是同一口径：前者决定是否生成复盘，后者只决定偏移分如何计算。
 
@@ -125,7 +125,7 @@ step4  if degraded == true:      needs_review = true，并计入 R_DEGRADED_REVI
 
 > `step2` 不是简单的 `min(final_color, orange)`，精确语义见 5.2：`red` 豁免，`orange`/`yellow`/`blue` 保持，`green` 抬至 `orange`。
 
-`step4` 不改变 `final_color`，只决定是否建单。因此存在"绿 + 降级"的组合，见第 6 节条件 6。
+`step4` 不改变 `final_color`，只决定是否生成任务。因此存在"绿 + 降级"的组合，见第 6 节条件 6。
 
 本文中的 `degraded` 一律指**分析降级**，即 `analysis_status == "degraded"`；对应 [api.md](./contracts/api.md) 响应 `degraded` 数组中的 `"analysis"` 元素，与采集降级（`partial` / 单模态）无关。
 
@@ -135,12 +135,12 @@ step4  if degraded == true:      needs_review = true，并计入 R_DEGRADED_REVI
 
 | 单次 | 趋势 | 一致性 | 最终 | 强制复核 | 说明 |
 |---|---|---|---|---|---|
-| `none` | `green` | `high` | `green` | 否 | 不建单 |
-| `none` | `blue` | `high` | `blue` | 否 | P2 工单 |
-| `none` | `yellow` | `medium` | `yellow` | 否 | P1 工单 |
+| `none` | `green` | `high` | `green` | 否 | 不生成任务 |
+| `none` | `blue` | `high` | `blue` | 否 | P2 复核任务 |
+| `none` | `yellow` | `medium` | `yellow` | 否 | P1 复核任务 |
 | `red` | `green` | `low` | `red` | 是 | 红不受封顶约束 |
 | `orange` | `yellow` | `low` | `orange` | 是 | 封顶到橙，强制复核 |
-| `orange` | `green` | `high` | `orange` | 否 | P0 工单 |
+| `orange` | `green` | `high` | `orange` | 否 | P0 复核任务 |
 
 ### 5.2 封顶规则（R_CONSISTENCY_CAP）
 
@@ -160,7 +160,7 @@ step4  if degraded == true:      needs_review = true，并计入 R_DEGRADED_REVI
 
 ## 6. 复核触发条件
 
-| # | 条件 | 是否建单 | 优先级 | 建议处理时限 |
+| # | 条件 | 是否生成任务 | 优先级 | 建议处理时限 |
 |---|---|---|---|---|
 | 1 | `final_color == "red"` | 是 | `P0` | 24 小时内 |
 | 2 | `final_color == "orange"` | 是 | `P0` | 24 小时内 |
@@ -172,9 +172,9 @@ step4  if degraded == true:      needs_review = true，并计入 R_DEGRADED_REVI
 | 8 | `capture_status in (partial, no_face, no_audio)`（技术性降级或单模态） | 是，且强制 `manual_review=1` | `P0`（同规则 5） | 24 小时内 |
 | 8a | `capture_status in (no_face_no_audio, error)`（无任何可用产物） | **否** | — | 由前端提示重采，不进分析队列 |
 | 9 | 窗口无可用会话 | **否** | — | 返回 `no_session_in_window` |
-| 10 | `R_BASELINE_INSUFFICIENT` 单独命中 | 随蓝一起建单 | `P2` | 7 天内 |
+| 10 | `R_BASELINE_INSUFFICIENT` 单独命中 | 随蓝一起生成任务 | `P2` | 7 天内 |
 
-> 命中规则 8 的会话：`consistency` 强制 `low`，`final_color` 按 5.2 处理（`red` 豁免、不封顶；`green` 抬至 `orange`；其余保持），`rules_fired` 记 `R_CONSISTENCY_CAP`，且**必须生成复核工单**（`suggested_method=recapture`、`P0`）。与规则 6 同时命中时，按规则 8 的 `P0` 建单。
+> 命中规则 8 的会话：`consistency` 强制 `low`，`final_color` 按 5.2 处理（`red` 豁免、不封顶；`green` 抬至 `orange`；其余保持），`rules_fired` 记 `R_CONSISTENCY_CAP`，且**必须生成复核任务**（`suggested_method=recapture`、`P0`）。与规则 6 同时命中时，按规则 8 生成 `P0` 任务。
 
 ### 6.1 建议复核方式映射
 
@@ -190,8 +190,8 @@ step4  if degraded == true:      needs_review = true，并计入 R_DEGRADED_REVI
 ### 6.2 幂等约束
 
 - 一次 `reviews` 记录最多对应一张 `review_tickets`（`UNIQUE(review_id)`）；
-- 同一会话重复触发分析，不重复建单；
-- 已关闭的工单不再接受新流转。
+- 同一会话重复触发分析，不重复生成任务；
+- 已关闭的复核任务不再接受新流转。
 
 ## 7. 证据链要求
 
@@ -261,9 +261,9 @@ step4  if degraded == true:      needs_review = true，并计入 R_DEGRADED_REVI
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | `grading@1.0` | 2026-11-23 | 初版：五色定义、单次与趋势规则、合成封顶、复核触发 |
-| `grading@1.1` | 2026-11-23 | 规则 8 收敛：partial 与单模态强制 `consistency=low`、颜色上限 `orange`、必须建单；无产物会话不建单 |
+| `grading@1.1` | 2026-11-23 | 规则 8 收敛：partial 与单模态强制 `consistency=low`、颜色上限 `orange`、必须生成任务；无产物会话不生成任务 |
 | `grading@1.2` | 2026-11-23 | 规则 8 的 `P0` 恢复“同规则 5”引用；v1.2 冻结 |
-| `grading@1.2`（实现补记） | 2026-11-24 | 实现驱动澄清：5.2 低一致性精确语义（`green→orange`、`red` 豁免、蓝/黄/橙保持）、规则 8 的 `red` 不封顶与 `recapture`/`P0` 建单、登记 analysis 侧 `risk_level` 映射；`rule_version` 仍 `grading@1.2`，属附加非破坏变更 |
+| `grading@1.2`（实现补记） | 2026-11-24 | 实现驱动澄清：5.2 低一致性精确语义（`green→orange`、`red` 豁免、蓝/黄/橙保持）、规则 8 的 `red` 不封顶与 `recapture`/`P0` 生成任务、登记 analysis 侧 `risk_level` 映射；`rule_version` 仍 `grading@1.2`，属附加非破坏变更 |
 | `grading@1.2`（实现补记·二） | 2026-11-24 | 规则 5 的 `P0` 明确由 `manual_review` 驱动（`build_ticket` 覆写 `priority`）；4.3 明确「可用会话」定义及其与趋势样本、规则 8 的关系；`rule_version` 不变 |
 
 变更要求：

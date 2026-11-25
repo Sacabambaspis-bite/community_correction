@@ -13,6 +13,8 @@
 
 > **v1.2 实现补记·二（2026-11-24，附加、非破坏）**：`mode="both"` 新增**手动录音模式**——`run_capture_session(..., duration_sec=None, stop_event: threading.Event)`：人脸抓拍照常完成后开始录音，录音持续至 `stop_event.set()`（由 API 层 `POST /api/sessions/{id}/stop` 触发），**不存在任何自动终止/倒计时**；`meta.audio.duration_sec` 记录实际时长；`audio_too_short` 等业务判定不变（属结果反馈而非自动终止）；`stop_event` 置位前的 `audio.wav` 不落盘。显式传 `duration_sec` 的定时模式保持兼容不变；face_only 模式无音频、不涉及本补记。
 
+> **术语同步（2026-11-25，编辑器、无版本变更）**：中文表述统一为「复核任务」，与本契约相关的采集行为不变。
+
 ---
 
 ## 1. 职责边界
@@ -94,7 +96,7 @@
 
 - `capture_status in (no_face_no_audio, error)` 时 `sessions.status=failed`；
 - **保留 `meta.json`** 及其所在会话目录用于排查，不因失败删除；
-- 失败会话**不进入分析管线**、**不计入七日复盘**、**不生成复核工单**；
+- 失败会话**不进入分析管线**、**不计入七日复盘**、**不生成复核任务**；
 - 重试必须使用新的 `session_id`，不复用失败目录；
 - 失败会话的留存与清理遵循 [db.md](./db.md) 第 10 节，采集层不主动删除。
 
