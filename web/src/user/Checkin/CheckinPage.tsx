@@ -174,6 +174,12 @@ export default function CheckinPage() {
 
   return (
     <main className={styles.page}>
+      <div className={styles.topBar}>
+        <Link className={styles.backButton} to="/capture">
+          返回首页
+        </Link>
+      </div>
+
       <PageTitle
         title="刷脸签到"
         description="请按提示完成面部图像采集，采集过程中页面会显示红点与「正在采集」提示。"

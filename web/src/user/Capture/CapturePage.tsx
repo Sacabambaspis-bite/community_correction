@@ -204,6 +204,12 @@ export default function CapturePage() {
 
   return (
     <main className={styles.page}>
+      <div className={styles.topBar}>
+        <Link className={styles.backButton} to="/capture">
+          返回首页
+        </Link>
+      </div>
+
       <PageTitle
         title="录音思想汇报"
         description="请按提示进行思想汇报录音，采集过程中页面会一直显示红点与「正在采集」提示；结束后请手动点击「结束录音」。"

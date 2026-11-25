@@ -296,6 +296,31 @@
   font-weight: 600;
 }
 
+/* 子页顶部返回入口：与完成页的「返回首页」保持同一文案与视觉规范。 */
+.topBar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.backButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 14px;
+}
+
+.backButton:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
 .footerHint {
   font-size: 12px;
 }
