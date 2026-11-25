@@ -1,0 +1,97 @@
+/* 复盘详情（ui@1.2 §4.6）：只读页面，颜色仅引用 tokens 变量。
+ * 证据表格自身带横向滚动兜底（EvidenceTable 的 tableWrap），本模块不复制该逻辑。
+ */
+.section {
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  /* 结论区「查看依据」锚点跳转后留出少量上边距。 */
+  scroll-margin-top: var(--space-4);
+}
+
+.sectionTitle {
+  margin-bottom: var(--space-3);
+  font-size: 15px;
+}
+
+.infoGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-3);
+}
+
+.infoItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.infoLabel {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.infoValue {
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.subjectCode {
+  margin-left: var(--space-2);
+  color: var(--color-text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.resultRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.metaGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+}
+
+.metaItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.metaLabel {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.metaValue {
+  margin: 0;
+  font-size: 14px;
+}
+
+.hint {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.notice {
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.footHint {
+  margin-top: var(--space-3);
+  color: var(--color-text-muted);
+  font-size: 12px;
+}

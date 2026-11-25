@@ -331,6 +331,106 @@ export type DashboardData = {
   overdue: SubjectOverdue;
 };
 
+/* ---------- 管理端 · 对象心理状态趋势（api@1.5 §7.18） ----------
+ * 字段逐字对齐契约，snake_case 不做前端改名。
+ */
+
+/** 当日复盘（`reviews.window_end == date`，至多一条）。 */
+export type TrendReview = {
+  color: Color;
+  review_id: string;
+  rules_fired: string[];
+  consistency: string;
+  manual_review: boolean;
+  evidence_available: boolean;
+};
+
+/** 文本指标统计：`count < 2` 时 `std` 为 null，`count = 0` 时 `mean` 为 null。 */
+export type TrendStat = {
+  mean: number | null;
+  std: number | null;
+  count: number;
+};
+
+export type TrendSessionCounts = {
+  total: number;
+  checkin: number;
+  report: number;
+  analyzed: number;
+  failed: number;
+};
+
+export type TrendConsistency = {
+  degraded: number;
+  low: number;
+  conflict: number;
+};
+
+export type TrendBehaviorKind = {
+  expected: boolean;
+  completed: boolean;
+  overdue: boolean;
+};
+
+export type TrendBehaviorState = {
+  checkin: TrendBehaviorKind;
+  report: TrendBehaviorKind;
+};
+
+export type TrendDay = {
+  date: string;
+  review: TrendReview | null;
+  analysis_risk_level: string | null;
+  sessions: TrendSessionCounts;
+  text_valence: TrendStat;
+  text_signal: TrendStat;
+  consistency: TrendConsistency;
+  behavior: TrendBehaviorState;
+};
+
+export type TrendScatterPoint = {
+  date: string;
+  session_id: string;
+  captured_at: string;
+  kind: string;
+  valence: number;
+  signal: number;
+  arousal: number | null;
+  emotion_label: string | null;
+  review_color: Color | null;
+  review_rules: string[];
+  review_id: string | null;
+};
+
+export type TrendQuadrants = {
+  q1: number;
+  q2: number;
+  q3: number;
+  q4: number;
+};
+
+export type TrendSummary = {
+  analyzed_count: number;
+  avg_valence: number | null;
+  avg_signal: number | null;
+  valence_std: number | null;
+  signal_std: number | null;
+  coverage_rate: number;
+  quadrants: TrendQuadrants;
+  signals: string[];
+};
+
+export type SubjectTrends = {
+  subject_id: string;
+  start_date: string;
+  end_date: string;
+  interval_days: { checkin: number; report: number };
+  days: TrendDay[];
+  scatter_points: TrendScatterPoint[];
+  summary: TrendSummary;
+  degraded: string[];
+};
+
 /* ---------- 管理端 · 按日期的打卡影像与思想汇报录音 ----------
  * 原型扩展：api@1.5 明确不返回音频与原始影像，联调前需补契约与留痕规则。
  */

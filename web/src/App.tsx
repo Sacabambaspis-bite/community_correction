@@ -3,6 +3,7 @@
  */
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import AdminLayout from "./admin/AdminLayout";
+import ReviewDetailPage from "./admin/Reviews/ReviewDetailPage";
 import SubjectDetailPage from "./admin/SubjectDetail/SubjectDetailPage";
 import SubjectListPage from "./admin/Subjects/SubjectListPage";
 import TicketDetailPage from "./admin/Tickets/Detail/TicketDetailPage";
@@ -75,6 +76,8 @@ export default function App() {
           <Route path="dashboard" element={<Navigate to="/admin/subjects" replace />} />
           <Route path="tickets" element={<TicketsPage />} />
           <Route path="tickets/:ticketId" element={<TicketDetailPage />} />
+          {/* 看板散点与热力块的证据入口：单条复盘只读详情。 */}
+          <Route path="reviews/:reviewId" element={<ReviewDetailPage />} />
         </Route>
 
         <Route path="*" element={<NotFoundPage />} />

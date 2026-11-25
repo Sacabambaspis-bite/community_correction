@@ -35,6 +35,7 @@ import { ApiError } from "../../lib/http";
 import { SessionTimeline } from "./SessionTimeline";
 import { SensevoiceSyncPanel } from "./SensevoiceSyncPanel";
 import { TrendStrip } from "./TrendStrip";
+import { TrendBoard } from "./TrendBoard/TrendBoard";
 import styles from "./SubjectDetail.module.css";
 
 const STATUS_TEXT: Record<string, string> = {
@@ -379,7 +380,7 @@ export default function SubjectDetailPage() {
     <section>
       <PageTitle
         title="对象详情"
-        description="基础信息、状态概览、打卡影像与思想汇报录音、频率配置、会话时间线与敏感内容。"
+        description="基础信息、状态概览、打卡影像与思想汇报录音、频率配置、当前结果、心理状态趋势（并入状态概览）、会话时间线与敏感内容。"
         extra={<Link to="/admin/subjects">返回对象列表</Link>}
       />
 
@@ -526,6 +527,7 @@ export default function SubjectDetailPage() {
             </div>
           </>
         ) : null}
+        <TrendBoard subjectId={subject?.subject_id ?? subjectId ?? ""} />
       </section>
 
       <section className={styles.section}>

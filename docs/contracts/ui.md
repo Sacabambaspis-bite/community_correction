@@ -42,6 +42,35 @@
 
 > v1.2 实现补记 10（2026-11-25，附加、非破坏）：管理端界面与相关契约的中文表述统一为「复核任务」——指分级规则命中或逾期后自动生成、由工作人员在复核队列中按优先级与截止时间处理的事项；「任务来源」「生成时间」「自动生成」同步替换原单据化措辞。技术标识 `review_tickets`、`/api/admin/tickets`、`ticket_id` 及状态枚举保持不变，接口语义与流转规则不变。
 
+> **v1.2 实现补记 11（2026-11-25，附加、非破坏）**：对象详情「近 7 天趋势」升级为「心理状态分析看板」（§4.2），对接 api@1.5 §7.18，按**任意日期区间**查询并按四个图表呈现；`TrendStrip` 保留但不再作为主视图。
+>
+> 1. **日期区间条**：预设「近 7 天 / 近 14 天 / 近 30 天」+ 自定义起止日期；默认近 14 天（含端点）；跨度上限 366 天，超出前端直接拦截提示；日期改动仅更新草稿，点击「查询」后才发起请求；请求需做竞态处理（丢弃过期响应）。
+> 2. **图表选型（Recharts）**：
+>    - **情绪二维散点图（Russell 环形模型）**：X 轴效价 `valence ∈ [-1,1]`，Y 轴信号强度 `signal ∈ [0,100]`（可切换 Y 轴为唤醒度 `arousal ∈ [0,1]`）；每个点代表一次已分析的思想汇报；点色=该会话所在自然日复盘五色，**无复盘色时使用中性灰且不得使用五色**；点径映射信号强度；背景按四象限分块并标注象限语义；hover tooltip 展示日期、效价、信号、唤醒度、色名、`rules_fired` 中文名与证据入口。
+>    - **五色日历热力图**：以周为列/星期为行的日历网格（CSS Grid 自绘），色块=当日 `review.color`，无复盘=中性灰；hover 展示日期、色名、`rules_fired` 与证据入口；图例含「无复盘」。
+>    - **稳定性与一致性柱状图**：按日分组柱，分别展示 `degraded`、`consistency=low`、`conflict` 三项计数；缺失日期按 0 展示；hover 展示具体日期与三项计数。
+>    - **行为依从性日历（GitHub 风格）**：签到、汇报各一行，按日展示「已完成 / 逾期 / 未要求」三态；**必须使用独立配色（成功/危险描边/中性灰），禁止复用五色风险令牌**；需在图注说明 `overdue` 为历史回溯口径，与列表页实时逾期可能不同。
+> 3. **心理学语义提示**：`summary.signals[]` 由 `web/src/lib/psychText.ts` 统一映射为中性描述与建议动作，逐条附「仅作提示，需结合面谈与人工复核」；**严禁**出现「抑郁 / 焦虑症 / 人格障碍 / 精神异常」等诊断词，严禁把信号表述为系统结论（§6 红线）；无 `signals` 时展示中性空提示。
+> 4. **色码硬规则不豁免**：散点与热力块展示的任何五色都必须同屏可追溯到 `rules_fired` 与证据入口（§5.2）；纯灰块不承载风险信息。
+> 5. **状态**：加载用骨架；接口失败用统一错误横幅 + 重试；区间无数据展示明确空态与引导文案，不渲染空白图表。
+> 6. **禁止**：跨对象对比、趋势排名、任何分数或处置动作；不写入 `localStorage` / `IndexedDB`。
+> 7. **依赖**：新增 `recharts`（按需引入），不引入全局状态库。
+
+> **v1.2 实现补记 12（2026-11-25，结构重构、非破坏）**：心理状态看板并入「状态概览」，四个图表改为可折叠。
+>
+> 1. **合并结构**：移除独立的「心理状态分析看板」区块、标题与容器；其全部内容（日期区间条、区间汇总、心理提示卡、四个图表）嵌入 `/admin/subjects/:subjectId` 的「状态概览」卡内，位置在「五色分布 / 待复核与最近采集 / 近 7 天趋势」之后。
+> 2. **折叠交互**：四个图表分别封装为可折叠按钮——Russell 二维散点图、五色日历热力图、稳定性与一致性柱状图、行为依从性日历；**默认全部收起，仅显示按钮**（标题 + 展开指示），点击展开完整内容，再次点击收起。按钮使用 `<button type="button" aria-expanded aria-controls>`，支持键盘操作与 `:focus-visible`；展开面板带 `role="region"` 与 `aria-label`。
+> 3. **常驻内容**：日期区间条、区间汇总、心理提示卡**不折叠**，始终显示；切换区间后保留各图表的展开/收起状态。
+> 4. **渲染与动效**：图表仅在展开时挂载（避免隐藏容器内 Recharts 尺寸为 0 导致空白/错位），收起即卸载；展开使用 160–220ms 的透明度/位移入场过渡。折叠与展开不得造成横向滚动、卡片高度跳变或样式错乱。
+> 5. **内容不变**：四图的数据、交互、证据深链（`/admin/reviews/:reviewId`）、空态、图例、免责声明与色彩规则均与补记 11 一致；加载骨架只保留区间汇总与按钮占位，不再预渲染四个空卡片。
+
+> **v1.2 实现补记 13（2026-11-25，排版调整、非破坏）**：五色日历热力图由「周为列 / 星期为行」的纵向矩阵改为**按日期从左到右、自动换行的横向序列**。
+>
+> 1. 每个日期一格，按 `date` 升序从左到右排列，格下方显示 `MM-DD` 日期标签；容器宽度不足时按行折行，单元格间距统一（6px），不出现横向滚动条。
+> 2. 五色映射、无复盘中性灰、选中描边、键盘聚焦、hover/点击详情面板、规则中文、证据深链（`/admin/reviews/:reviewId`）全部不变。
+> 3. 移除星期行标签与周列结构；无障碍组标签更新为「按日期从左到右排列」；图注同步说明折行规则。
+> 4. 目标：14 天数据在常见桌面宽度下一行完整可见；窄屏按行折行（约 2–3 行）展示，避免纵向长滚动。
+
 ---
 
 ## 1. 技术约定
@@ -183,17 +212,34 @@
 | 频率配置（2026-11-24 新增） | 签到/汇报间隔天数两个整数输入（≥1），保存调 `PATCH /api/admin/subjects/{id}/frequency` |
 | 逾期标记（2026-11-24 新增） | `overdue.checkin/report` 为 true 时显示红色「危机·逾期」徽标与最近完成时间；对象列表与看板同款标记 |
 | 当前结果 | 最近一次 `reviews` 的 `final_color` + `rules_fired` + 证据摘要（同屏） |
+| 状态概览（2026-11-25 补记 12 合并） | 五色分布、待复核与最近采集、近 7 天趋势，以及并入的「心理状态趋势」：日期区间条（预设 7/14/30 天 + 自定义，默认近 14 天）+ 区间汇总 + 心理提示卡 + 四个**可折叠**图表（Russell 二维散点图、五色日历热力图、稳定性与一致性柱状图、行为依从性日历，默认全部收起仅显示按钮）；数据源 `GET /api/admin/subjects/{id}/trends`（api@1.5 §7.18）；**不设独立看板区块、标题或入口** |
 | 会话时间线 | 按 `captured_at` 倒序，显示 `capture_status`、`analysis_status`、色码 |
 | 记录检索 | 时间范围、色码筛选 |
 | 敏感内容 | 面部图、转写原文默认折叠，点击展开并调用留痕接口 |
 | 思想汇报同步（2026-11-25 新增） | 「同步思想汇报」按钮调用 `POST /api/admin/subjects/{id}/sensevoice-sync`；下方列表展示 `data_version`、情绪类型/置信度、操作人、时间；点击「查看完整报告」调 `GET /api/admin/sensevoice-syncs/{sync_id}`（留痕）并展开转写全文、情绪类型、置信度、关键触发片段。能力未启用时显示中性提示「同步能力未启用，请联系管理员」，**不得展示伪造的转写或情绪结果** |
+
+#### 4.2.1 心理提示文案映射（补记 11）
+
+后端只回 `summary.signals[]` 机器码，前端在 `web/src/lib/psychText.ts` 统一映射；每条提示固定追加「仅作提示，需结合面谈与人工复核」。**禁止使用任何诊断词或结论式判断**。
+
+| signal | 标题（中性） | 建议动作 | 禁用表述 |
+|---|---|---|---|
+| `insufficient_data` | 有效分析样本不足 | 暂不足以形成趋势提示，可按约定继续采集 | 任何推断性结论 |
+| `low_arousal_negative` | 区间内呈现持续低效价、低唤醒的表达特征 | 建议优先安排面谈，核实近期生活与睡眠状况 | 抑郁倾向 / 抑郁状态 |
+| `high_arousal_negative` | 出现负向且高强度（高唤醒）的表达 | 建议尽快人工复核，关注是否存在明显紧张或易激惹表现 | 焦虑症 / 躁狂 |
+| `persistent_low_valence` | 多日效价持续偏低 | 建议结合面谈核实持续时长与诱因 | 抑郁 / 情绪障碍 |
+| `valence_volatility_high` | 情绪效价日间波动较大 | 建议结合采集质量与事件背景复核，避免依据单日结论 | 情绪不稳（作为诊断） |
+| `signal_escalating` | 近期信号强度呈上行趋势 | 建议关注近期是否有应激事件，并按优先级复核 | 病情加重 |
+| `frequent_low_consistency` | 多日出现跨模态不一致 | 可能受采集质量或表达方式影响，建议核对影像与录音 | 伪装 / 掩饰（作为定性） |
+| `frequent_capture_degraded` | 区间内多次出现分析降级 | 建议核对采集环境与设备，必要时重新采集 | — |
+| `behavior_overdue_frequent` | 区间内多次未按期完成签到或汇报 | 建议联系核实履约情况 | 违规 / 抗拒监管 |
 
 ### 4.3 状态看板 `/admin/dashboard`（补记 9 起已合并进对象详情，本节仅保留历史契约）
 
 | 区块 | 内容 |
 |---|---|
 | 色码分布 | 单对象五色计数（`color_distribution`） |
-| 7 日趋势 | `trend_7d` 折线或色块序列 |
+| 7 日趋势 | `trend_7d` 折线或色块序列（补记 11 起在本页由心理状态分析看板取代，接口保留兼容） |
 | 待复核 | `pending_tickets`，点击跳队列 |
 | 最近采集 | `last_session_at` |
 
@@ -232,6 +278,23 @@
 | 关闭 | `note`（必填） | 不得为空 |
 
 **禁止**：一键处置、批量改变对象状态、批量关闭复核任务。
+
+### 4.6 复盘详情 `/admin/reviews/:reviewId`
+
+看板（§4.2 补记 11）中散点与热力块的证据入口统一指向本页；数据源 `GET /api/admin/reviews/{review_id}`（api@1.5 §7.9）。**只读**，不提供复核流转动作。
+
+| 区块 | 内容 |
+|---|---|
+| 基本信息 | 对象（姓名 + 可点回 `/admin/subjects/:subjectId`）、窗口起止与天数、生成时间、`grading_version` |
+| 结论区 | `final_color` 色码 + `rules_fired` 中文名 + `trend_color` / `single_session_risk` / `consistency` / `manual_review`；色码与规则、证据链入口同屏 |
+| 证据链 | `EvidenceTable`：字段、观测值、阈值名称与值、会话编号 |
+| 返回入口 | 返回对象详情；接口 `1004` 时展示错误横幅与重试，不渲染空白页 |
+
+约定：
+
+1. 证据入口携带 `review_id` 直达本页；缺少 `review_id` 的看板点位**不得伪造链接**，只显示中性说明（不拼接 `subject_id` 回退到复核队列）。
+2. 本页不展示转写原文、音频、影像；如需查看原始内容，走复核任务详情的折叠敏感面板（留痕）。
+3. 未知 `rule_id` / `field_path` / `threshold_key` 沿用 `ruleText.ts` 的中性兜底，不显示英文原始键。
 
 ## 5. 色码展示规则
 
@@ -321,12 +384,22 @@ type ColorBadgeProps = {
 |---|---|---|
 | `SubjectTable` | `web/src/admin/Subjects/SubjectTable.tsx` | 列表与筛选 |
 | `ColorBadge` | `web/src/components/common/ColorBadge.tsx` | 色码 + 规则 + 证据入口 |
-| `EvidenceTable` | `web/src/admin/Tickets/EvidenceTable.tsx` | 证据链表格 |
+| `EvidenceTable` | `web/src/admin/Tickets/EvidenceTable.tsx` | 证据链表格（复盘详情复用） |
+| `ReviewDetailPage` | `web/src/admin/Reviews/ReviewDetailPage.tsx` | 单条复盘只读详情：结论、规则中文、证据链（§4.6） |
 | `SessionTimeline` | `web/src/admin/SubjectDetail/SessionTimeline.tsx` | 会话记录 |
 | `SensitivePanel` | `web/src/components/common/SensitivePanel.tsx` | 折叠敏感字段 + 留痕 |
 | `SensevoiceSyncPanel` | `web/src/admin/SubjectDetail/SensevoiceSyncPanel.tsx` | 思想汇报同步按钮、记录列表、完整报告展开 |
 | `TicketActions` | `web/src/admin/Tickets/TicketActions.tsx` | 三种流转动作与校验 |
-| `TrendStrip` | `web/src/admin/SubjectDetail/TrendStrip.tsx` | 7 日趋势（随看板合并迁移，补记 9） |
+| `TrendStrip` | `web/src/admin/SubjectDetail/TrendStrip.tsx` | 7 日趋势（随看板合并迁移，补记 9；补记 11 起保留但不再作为主视图） |
+| `TrendBoard` | `web/src/admin/SubjectDetail/TrendBoard/TrendBoard.tsx` | 心理状态趋势容器（嵌入「状态概览」）：区间联动、请求竞态、加载/空/错态、图表折叠编排（补记 11 / 12） |
+| `ChartCollapsible` | `web/src/admin/SubjectDetail/TrendBoard/ChartCollapsible.tsx` | 图表折叠按钮与面板：默认收起、`aria-expanded` 控制、展开时挂载图表、入场过渡 |
+| `TrendDateRange` | `web/src/admin/SubjectDetail/TrendBoard/TrendDateRange.tsx` | 预设 7/14/30 天 + 自定义区间，跨度上限 366 天 |
+| `RussellScatter` | `web/src/admin/SubjectDetail/TrendBoard/RussellScatter.tsx` | 效价 × 信号/唤醒散点，五色 + 证据入口、四象限底纹 |
+| `ColorCalendarHeatmap` | `web/src/admin/SubjectDetail/TrendBoard/ColorCalendarHeatmap.tsx` | 日粒度五色日历热力图（CSS Grid），无复盘中性灰 |
+| `StabilityBarChart` | `web/src/admin/SubjectDetail/TrendBoard/StabilityBarChart.tsx` | 每日 degraded / low / conflict 分组柱 |
+| `ComplianceCalendar` | `web/src/admin/SubjectDetail/TrendBoard/ComplianceCalendar.tsx` | 签到/汇报依从性日历，独立三态配色 |
+| `PsychInsightList` | `web/src/admin/SubjectDetail/TrendBoard/PsychInsightList.tsx` | `signals` → 中性提示 + 免责声明 |
+| `psychText` | `web/src/lib/psychText.ts` | signal 码 → 中性文案映射（补记 11 §4.2.1） |
 
 ## 9. 验收清单
 
@@ -338,5 +411,13 @@ type ColorBadgeProps = {
 - [ ] 复核任务三种动作校验符合第 4.5 节
 - [ ] 无 localStorage / IndexedDB 存储音视频
 - [ ] 所有接口错误码都有可见提示
+- [ ] 趋势看板日期区间默认近 14 天、上限 366 天，超出有前置拦截提示
+- [ ] 趋势看板五色块/散点均可追溯 `rules_fired` 与证据入口，无复盘日不着五色
+- [ ] 看板证据入口可直达 `/admin/reviews/:reviewId`；缺 `review_id` 时给出中性说明，不伪造链接
+- [ ] 心理状态趋势已并入「状态概览」，页面不存在独立的「心理状态分析看板」区块或标题
+- [ ] 四个图表默认收起，仅显示按钮；点击可展开、再次点击可收起，键盘可操作，无布局跳动
+- [ ] 五色热力图按日期从左到右排列，窄屏自动折行，颜色、规则与证据交互保持不变
+- [ ] 心理提示仅使用中性表述且附「仅供参考，需人工复核」，无任何诊断词
+- [ ] 行为依从性日历不使用五色风险令牌
 - [ ] 不存在一键处置、批量改状态、跨对象排名入口
 - [ ] 色值只在 `tokens.css` 定义一次

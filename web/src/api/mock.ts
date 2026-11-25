@@ -6,6 +6,7 @@ import reviewMock from "../mock/review.json";
 import sessionMock from "../mock/session.json";
 import subjectMock from "../mock/subject.json";
 import ticketMock from "../mock/ticket.json";
+import trendMock from "../mock/trend.json";
 import { SUBJECT_ID } from "../lib/env";
 import type {
   AdminSessionItem,
@@ -25,6 +26,7 @@ import type {
   SubjectFrequencyPayload,
   SubjectListItem,
   SubjectProfileFields,
+  SubjectTrends,
   TicketDetail,
   TicketListItem,
   TransitionPayload,
@@ -76,6 +78,8 @@ const dashboardFile = dashboardMock as unknown as Omit<DashboardData, "overdue">
   variants?: Record<string, Omit<DashboardData, "overdue">>;
 };
 const review = reviewMock as unknown as ReviewDetail;
+/** 固定 14 天（2026-11-12 ~ 2026-11-25）；查询参数忽略，字段仍按 api@1.5 §7.18 完整返回。 */
+const trend = trendMock as unknown as SubjectTrends;
 
 const adminSessionItems: AdminSessionItem[] = [
   ...sessions.admin_list.items.map((item) => ({ ...item, kind: "report" as const })),
@@ -810,6 +814,16 @@ export async function mockRequest<T>(
     /^\/api\/admin\/sensevoice-syncs\/[^/]+$/.test(path)
   ) {
     return fail<T>(1004, "not_found");
+  }
+
+  /* 对象心理状态趋势（api@1.5 §7.18）：必须早于通用 /api/admin/subjects/{id} 分支，
+   * 否则会被对象详情吞掉。start_date / end_date 可忽略，固定返回 14 天完整字段。 */
+  if (
+    method === "GET" &&
+    /^\/api\/admin\/subjects\/[^/]+\/trends$/.test(path)
+  ) {
+    const subjectId = decodeURIComponent(path.split("/")[4]);
+    return ok<T>({ ...trend, subject_id: subjectId });
   }
 
   if (

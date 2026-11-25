@@ -1,0 +1,470 @@
+{
+  "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
+  "start_date": "2026-11-12",
+  "end_date": "2026-11-25",
+  "interval_days": { "checkin": 1, "report": 3 },
+  "days": [
+    {
+      "date": "2026-11-12",
+      "review": {
+        "color": "green",
+        "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b01",
+        "rules_fired": ["R_TREND_GREEN"],
+        "consistency": "high",
+        "manual_review": false,
+        "evidence_available": true
+      },
+      "analysis_risk_level": "watch",
+      "sessions": { "total": 2, "checkin": 1, "report": 1, "analyzed": 1, "failed": 0 },
+      "text_valence": { "mean": -0.4, "std": null, "count": 1 },
+      "text_signal": { "mean": 54.0, "std": null, "count": 1 },
+      "consistency": { "degraded": 0, "low": 0, "conflict": 0 },
+      "behavior": {
+        "checkin": { "expected": true, "completed": true, "overdue": false },
+        "report": { "expected": true, "completed": true, "overdue": false }
+      }
+    },
+    {
+      "date": "2026-11-13",
+      "review": {
+        "color": "green",
+        "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b02",
+        "rules_fired": ["R_TREND_GREEN"],
+        "consistency": "high",
+        "manual_review": false,
+        "evidence_available": true
+      },
+      "analysis_risk_level": "watch",
+      "sessions": { "total": 2, "checkin": 1, "report": 1, "analyzed": 1, "failed": 0 },
+      "text_valence": { "mean": -0.12, "std": null, "count": 1 },
+      "text_signal": { "mean": 52.0, "std": null, "count": 1 },
+      "consistency": { "degraded": 0, "low": 0, "conflict": 0 },
+      "behavior": {
+        "checkin": { "expected": true, "completed": true, "overdue": false },
+        "report": { "expected": false, "completed": false, "overdue": false }
+      }
+    },
+    {
+      "date": "2026-11-14",
+      "review": {
+        "color": "blue",
+        "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b03",
+        "rules_fired": ["R_TREND_BLUE"],
+        "consistency": "medium",
+        "manual_review": false,
+        "evidence_available": true
+      },
+      "analysis_risk_level": "watch",
+      "sessions": { "total": 2, "checkin": 1, "report": 1, "analyzed": 1, "failed": 0 },
+      "text_valence": { "mean": -0.28, "std": null, "count": 1 },
+      "text_signal": { "mean": 50.0, "std": null, "count": 1 },
+      "consistency": { "degraded": 1, "low": 0, "conflict": 0 },
+      "behavior": {
+        "checkin": { "expected": true, "completed": true, "overdue": false },
+        "report": { "expected": false, "completed": false, "overdue": false }
+      }
+    },
+    {
+      "date": "2026-11-15",
+      "review": {
+        "color": "yellow",
+        "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b04",
+        "rules_fired": ["R_TREND_YELLOW"],
+        "consistency": "medium",
+        "manual_review": false,
+        "evidence_available": true
+      },
+      "analysis_risk_level": "elevated",
+      "sessions": { "total": 2, "checkin": 1, "report": 1, "analyzed": 1, "failed": 0 },
+      "text_valence": { "mean": -0.62, "std": null, "count": 1 },
+      "text_signal": { "mean": 30.0, "std": null, "count": 1 },
+      "consistency": { "degraded": 0, "low": 0, "conflict": 0 },
+      "behavior": {
+        "checkin": { "expected": true, "completed": true, "overdue": false },
+        "report": { "expected": true, "completed": true, "overdue": false }
+      }
+    },
+    {
+      "date": "2026-11-16",
+      "review": {
+        "color": "yellow",
+        "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b05",
+        "rules_fired": ["R_TREND_YELLOW"],
+        "consistency": "medium",
+        "manual_review": false,
+        "evidence_available": true
+      },
+      "analysis_risk_level": "watch",
+      "sessions": { "total": 1, "checkin": 0, "report": 1, "analyzed": 1, "failed": 0 },
+      "text_valence": { "mean": -0.58, "std": null, "count": 1 },
+      "text_signal": { "mean": 33.0, "std": null, "count": 1 },
+      "consistency": { "degraded": 0, "low": 0, "conflict": 0 },
+      "behavior": {
+        "checkin": { "expected": true, "completed": false, "overdue": true },
+        "report": { "expected": false, "completed": false, "overdue": false }
+      }
+    },
+    {
+      "date": "2026-11-17",
+      "review": {
+        "color": "orange",
+        "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b06",
+        "rules_fired": ["R_TREND_ORANGE"],
+        "consistency": "medium",
+        "manual_review": false,
+        "evidence_available": true
+      },
+      "analysis_risk_level": "elevated",
+      "sessions": { "total": 2, "checkin": 1, "report": 1, "analyzed": 1, "failed": 0 },
+      "text_valence": { "mean": -0.41, "std": null, "count": 1 },
+      "text_signal": { "mean": 74.0, "std": null, "count": 1 },
+      "consistency": { "degraded": 0, "low": 0, "conflict": 1 },
+      "behavior": {
+        "checkin": { "expected": true, "completed": true, "overdue": false },
+        "report": { "expected": false, "completed": false, "overdue": false }
+      }
+    },
+    {
+      "date": "2026-11-18",
+      "review": {
+        "color": "blue",
+        "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b07",
+        "rules_fired": ["R_TREND_BLUE"],
+        "consistency": "high",
+        "manual_review": false,
+        "evidence_available": true
+      },
+      "analysis_risk_level": "watch",
+      "sessions": { "total": 2, "checkin": 1, "report": 1, "analyzed": 1, "failed": 0 },
+      "text_valence": { "mean": -0.05, "std": null, "count": 1 },
+      "text_signal": { "mean": 52.0, "std": null, "count": 1 },
+      "consistency": { "degraded": 0, "low": 0, "conflict": 0 },
+      "behavior": {
+        "checkin": { "expected": true, "completed": true, "overdue": false },
+        "report": { "expected": true, "completed": true, "overdue": false }
+      }
+    },
+    {
+      "date": "2026-11-19",
+      "review": {
+        "color": "green",
+        "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b08",
+        "rules_fired": ["R_TREND_GREEN"],
+        "consistency": "high",
+        "manual_review": false,
+        "evidence_available": true
+      },
+      "analysis_risk_level": "none",
+      "sessions": { "total": 2, "checkin": 1, "report": 1, "analyzed": 1, "failed": 0 },
+      "text_valence": { "mean": 0.55, "std": null, "count": 1 },
+      "text_signal": { "mean": 41.0, "std": null, "count": 1 },
+      "consistency": { "degraded": 0, "low": 0, "conflict": 0 },
+      "behavior": {
+        "checkin": { "expected": true, "completed": true, "overdue": false },
+        "report": { "expected": false, "completed": false, "overdue": false }
+      }
+    },
+    {
+      "date": "2026-11-20",
+      "review": {
+        "color": "blue",
+        "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b09",
+        "rules_fired": ["R_TREND_BLUE"],
+        "consistency": "medium",
+        "manual_review": false,
+        "evidence_available": true
+      },
+      "analysis_risk_level": "watch",
+      "sessions": { "total": 2, "checkin": 1, "report": 1, "analyzed": 1, "failed": 0 },
+      "text_valence": { "mean": -0.75, "std": null, "count": 1 },
+      "text_signal": { "mean": 27.0, "std": null, "count": 1 },
+      "consistency": { "degraded": 1, "low": 0, "conflict": 0 },
+      "behavior": {
+        "checkin": { "expected": true, "completed": true, "overdue": false },
+        "report": { "expected": false, "completed": false, "overdue": false }
+      }
+    },
+    {
+      "date": "2026-11-21",
+      "review": {
+        "color": "yellow",
+        "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b0a",
+        "rules_fired": ["R_TREND_YELLOW"],
+        "consistency": "medium",
+        "manual_review": false,
+        "evidence_available": true
+      },
+      "analysis_risk_level": "elevated",
+      "sessions": { "total": 2, "checkin": 1, "report": 1, "analyzed": 1, "failed": 0 },
+      "text_valence": { "mean": -0.22, "std": null, "count": 1 },
+      "text_signal": { "mean": 48.0, "std": null, "count": 1 },
+      "consistency": { "degraded": 0, "low": 0, "conflict": 1 },
+      "behavior": {
+        "checkin": { "expected": true, "completed": true, "overdue": false },
+        "report": { "expected": true, "completed": true, "overdue": false }
+      }
+    },
+    {
+      "date": "2026-11-22",
+      "review": {
+        "color": "orange",
+        "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b0b",
+        "rules_fired": ["R_CONSISTENCY_CAP"],
+        "consistency": "low",
+        "manual_review": true,
+        "evidence_available": true
+      },
+      "analysis_risk_level": "high",
+      "sessions": { "total": 1, "checkin": 0, "report": 1, "analyzed": 1, "failed": 0 },
+      "text_valence": { "mean": -0.66, "std": null, "count": 1 },
+      "text_signal": { "mean": 79.0, "std": null, "count": 1 },
+      "consistency": { "degraded": 0, "low": 1, "conflict": 0 },
+      "behavior": {
+        "checkin": { "expected": true, "completed": false, "overdue": true },
+        "report": { "expected": false, "completed": false, "overdue": false }
+      }
+    },
+    {
+      "date": "2026-11-23",
+      "review": {
+        "color": "orange",
+        "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b0c",
+        "rules_fired": ["R_TREND_ORANGE"],
+        "consistency": "medium",
+        "manual_review": false,
+        "evidence_available": true
+      },
+      "analysis_risk_level": "watch",
+      "sessions": { "total": 2, "checkin": 1, "report": 1, "analyzed": 1, "failed": 0 },
+      "text_valence": { "mean": 0.11, "std": null, "count": 1 },
+      "text_signal": { "mean": 57.0, "std": null, "count": 1 },
+      "consistency": { "degraded": 0, "low": 0, "conflict": 0 },
+      "behavior": {
+        "checkin": { "expected": true, "completed": true, "overdue": false },
+        "report": { "expected": false, "completed": false, "overdue": false }
+      }
+    },
+    {
+      "date": "2026-11-24",
+      "review": {
+        "color": "yellow",
+        "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b0d",
+        "rules_fired": ["R_TREND_YELLOW"],
+        "consistency": "medium",
+        "manual_review": false,
+        "evidence_available": true
+      },
+      "analysis_risk_level": null,
+      "sessions": { "total": 1, "checkin": 1, "report": 0, "analyzed": 0, "failed": 0 },
+      "text_valence": { "mean": null, "std": null, "count": 0 },
+      "text_signal": { "mean": null, "std": null, "count": 0 },
+      "consistency": { "degraded": 0, "low": 0, "conflict": 0 },
+      "behavior": {
+        "checkin": { "expected": true, "completed": true, "overdue": false },
+        "report": { "expected": true, "completed": false, "overdue": true }
+      }
+    },
+    {
+      "date": "2026-11-25",
+      "review": {
+        "color": "blue",
+        "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b0e",
+        "rules_fired": ["R_TREND_BLUE"],
+        "consistency": "medium",
+        "manual_review": false,
+        "evidence_available": true
+      },
+      "analysis_risk_level": "watch",
+      "sessions": { "total": 2, "checkin": 1, "report": 1, "analyzed": 1, "failed": 0 },
+      "text_valence": { "mean": -0.38, "std": null, "count": 1 },
+      "text_signal": { "mean": 46.0, "std": null, "count": 1 },
+      "consistency": { "degraded": 0, "low": 0, "conflict": 0 },
+      "behavior": {
+        "checkin": { "expected": true, "completed": true, "overdue": false },
+        "report": { "expected": false, "completed": false, "overdue": false }
+      }
+    }
+  ],
+  "scatter_points": [
+    {
+      "date": "2026-11-12",
+      "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e01",
+      "captured_at": "2026-11-12T09:12:36+08:00",
+      "kind": "report",
+      "valence": -0.4,
+      "signal": 54.0,
+      "arousal": 0.52,
+      "emotion_label": "negative",
+      "review_color": "green",
+      "review_rules": ["R_TREND_GREEN"],
+      "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b01"
+    },
+    {
+      "date": "2026-11-13",
+      "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e02",
+      "captured_at": "2026-11-13T09:10:11+08:00",
+      "kind": "report",
+      "valence": -0.12,
+      "signal": 52.0,
+      "arousal": 0.35,
+      "emotion_label": "negative",
+      "review_color": "green",
+      "review_rules": ["R_TREND_GREEN"],
+      "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b02"
+    },
+    {
+      "date": "2026-11-14",
+      "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e03",
+      "captured_at": "2026-11-14T09:08:44+08:00",
+      "kind": "report",
+      "valence": -0.28,
+      "signal": 50.0,
+      "arousal": null,
+      "emotion_label": null,
+      "review_color": "blue",
+      "review_rules": ["R_TREND_BLUE"],
+      "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b03"
+    },
+    {
+      "date": "2026-11-15",
+      "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e04",
+      "captured_at": "2026-11-15T09:15:02+08:00",
+      "kind": "report",
+      "valence": -0.62,
+      "signal": 30.0,
+      "arousal": 0.18,
+      "emotion_label": "strong_negative",
+      "review_color": "yellow",
+      "review_rules": ["R_TREND_YELLOW"],
+      "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b04"
+    },
+    {
+      "date": "2026-11-16",
+      "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e05",
+      "captured_at": "2026-11-16T09:11:29+08:00",
+      "kind": "report",
+      "valence": -0.58,
+      "signal": 33.0,
+      "arousal": 0.22,
+      "emotion_label": "strong_negative",
+      "review_color": "yellow",
+      "review_rules": ["R_TREND_YELLOW"],
+      "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b05"
+    },
+    {
+      "date": "2026-11-17",
+      "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e06",
+      "captured_at": "2026-11-17T09:09:50+08:00",
+      "kind": "report",
+      "valence": -0.41,
+      "signal": 74.0,
+      "arousal": 0.78,
+      "emotion_label": "strong_negative",
+      "review_color": "orange",
+      "review_rules": ["R_TREND_ORANGE"],
+      "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b06"
+    },
+    {
+      "date": "2026-11-18",
+      "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e07",
+      "captured_at": "2026-11-18T09:13:18+08:00",
+      "kind": "report",
+      "valence": -0.05,
+      "signal": 52.0,
+      "arousal": 0.45,
+      "emotion_label": "neutral",
+      "review_color": "blue",
+      "review_rules": ["R_TREND_BLUE"],
+      "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b07"
+    },
+    {
+      "date": "2026-11-19",
+      "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e08",
+      "captured_at": "2026-11-19T09:07:05+08:00",
+      "kind": "report",
+      "valence": 0.55,
+      "signal": 41.0,
+      "arousal": 0.36,
+      "emotion_label": "positive",
+      "review_color": "green",
+      "review_rules": ["R_TREND_GREEN"],
+      "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b08"
+    },
+    {
+      "date": "2026-11-20",
+      "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e09",
+      "captured_at": "2026-11-20T09:16:41+08:00",
+      "kind": "report",
+      "valence": -0.75,
+      "signal": 27.0,
+      "arousal": 0.12,
+      "emotion_label": "strong_negative",
+      "review_color": "blue",
+      "review_rules": ["R_TREND_BLUE"],
+      "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b09"
+    },
+    {
+      "date": "2026-11-21",
+      "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e0a",
+      "captured_at": "2026-11-21T09:12:12+08:00",
+      "kind": "report",
+      "valence": -0.22,
+      "signal": 48.0,
+      "arousal": null,
+      "emotion_label": null,
+      "review_color": "yellow",
+      "review_rules": ["R_TREND_YELLOW"],
+      "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b0a"
+    },
+    {
+      "date": "2026-11-22",
+      "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e0b",
+      "captured_at": "2026-11-22T09:10:37+08:00",
+      "kind": "report",
+      "valence": -0.66,
+      "signal": 79.0,
+      "arousal": 0.82,
+      "emotion_label": "strong_negative",
+      "review_color": "orange",
+      "review_rules": ["R_CONSISTENCY_CAP"],
+      "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b0b"
+    },
+    {
+      "date": "2026-11-23",
+      "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e0c",
+      "captured_at": "2026-11-23T09:14:55+08:00",
+      "kind": "report",
+      "valence": 0.11,
+      "signal": 57.0,
+      "arousal": 0.5,
+      "emotion_label": "positive",
+      "review_color": "orange",
+      "review_rules": ["R_TREND_ORANGE"],
+      "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b0c"
+    },
+    {
+      "date": "2026-11-25",
+      "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e0d",
+      "captured_at": "2026-11-25T09:06:20+08:00",
+      "kind": "report",
+      "valence": -0.38,
+      "signal": 46.0,
+      "arousal": 0.3,
+      "emotion_label": "negative",
+      "review_color": "blue",
+      "review_rules": ["R_TREND_BLUE"],
+      "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b0e"
+    }
+  ],
+  "summary": {
+    "analyzed_count": 13,
+    "avg_valence": -0.29,
+    "avg_signal": 49.5,
+    "valence_std": 0.36,
+    "signal_std": 15.3,
+    "coverage_rate": 0.8421,
+    "quadrants": { "q1": 1, "q2": 6, "q3": 5, "q4": 1 },
+    "signals": ["valence_volatility_high", "behavior_overdue_frequent"]
+  },
+  "degraded": []
+}

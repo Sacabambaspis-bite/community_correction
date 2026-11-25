@@ -1,0 +1,625 @@
+/* 心理状态趋势样式（并入对象详情「状态概览」）：只复用 tokens.css 的间距、字体与风险色变量。
+ * 图表专用中性色在本模块内局部定义，不写入 tokens，也不复用五色风险令牌。
+ */
+.trendBlock {
+  --trend-neutral: #e3e8ee;
+  --trend-quadrant-q1: #eef4fb;
+  --trend-quadrant-q2: #f3eff8;
+  --trend-quadrant-q3: #f1f3f5;
+  --trend-quadrant-q4: #eef7f4;
+  --trend-compliance-ok: #0f766e;
+  --trend-compliance-overdue: var(--color-danger);
+
+  min-width: 0;
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.appliedRange {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- 日期区间条 ---------- */
+
+.rangeForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.presetGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.presetButtons {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.filterLabel {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.presetButton,
+.modeButton {
+  padding: 2px var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.presetButtonActive,
+.modeButtonActive {
+  border-color: var(--color-primary);
+  background: var(--color-primary-weak);
+  color: var(--color-primary);
+}
+
+.presetButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.rangeField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 150px;
+}
+
+.input {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.queryButton {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.queryButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.rangeNote {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.validationError {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--color-danger);
+  font-size: 13px;
+}
+
+/* ---------- 汇总与提示 ---------- */
+
+.summaryPanel {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--space-3);
+}
+
+.summaryItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.summaryLabel {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.summaryValue {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.panelNote {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.insightPanel {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.panelTitle {
+  margin-bottom: var(--space-2);
+  font-size: 13px;
+}
+
+.insightList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.insightItem {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.insightTitle {
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.insightSuggestion {
+  margin: 0 0 2px;
+  font-size: 12px;
+}
+
+.insightDisclaimer {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.insightEmpty {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* ---------- 可折叠图表（纵向手风琴，默认收起） ---------- */
+
+.chartList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.chartCollapsible {
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.collapseButton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+}
+
+.collapseButton:hover {
+  background: var(--color-bg);
+}
+
+.collapseButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.collapseTitle {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.chevron {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-muted);
+  transition: transform 180ms ease;
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+}
+
+.collapsePanel {
+  min-width: 0;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-top: 1px solid var(--color-border);
+  animation: trendPanelIn 180ms ease-out both;
+}
+
+@keyframes trendPanelIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.chartDesc {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.chartCanvas {
+  width: 100%;
+}
+
+.scatterCanvas {
+  height: 300px;
+}
+
+.barCanvas {
+  height: 260px;
+}
+
+.chartCaption {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.chartEmpty {
+  padding: var(--space-4);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.modeToggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+/* ---------- 图例、详情与 tooltip ---------- */
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.swatch {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+}
+
+.swatchNeutral {
+  background: var(--trend-neutral);
+}
+
+.detailPanel {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  background: var(--color-bg);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.detailTitle {
+  margin: 0 0 var(--space-1);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.detailLine {
+  margin: 0 0 2px;
+  line-height: 1.6;
+}
+
+.detailMuted {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.detailLink {
+  color: var(--color-primary);
+  font-size: 12px;
+}
+
+.tooltip {
+  max-width: 280px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  color: var(--color-text);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.tooltip p {
+  margin: 0 0 2px;
+}
+
+.tooltipTitle {
+  font-weight: 600;
+}
+
+/* ---------- 五色日历热力图 ---------- */
+
+.calendarDayList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.calendarDayCell {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 40px;
+}
+
+.calendarDateLabel {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.calendarCell {
+  width: 100%;
+  min-height: 14px;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+@media (max-width: 480px) {
+  .calendarDayList {
+    gap: 4px;
+  }
+
+  .calendarDayCell {
+    width: 34px;
+  }
+}
+
+.calendarCellNoReview {
+  background: var(--trend-neutral);
+}
+
+.calendarCellSelected {
+  outline: 2px solid var(--color-text);
+  outline-offset: 1px;
+}
+
+.calendarCell:focus-visible,
+.complianceCell:focus-visible,
+.presetButton:focus-visible,
+.modeButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+/* ---------- 行为依从性日历 ---------- */
+
+.complianceRows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.complianceRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.complianceLabel {
+  width: 64px;
+  flex: none;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.complianceCells {
+  display: flex;
+  gap: 3px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.complianceCell {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.complianceOk {
+  background: var(--trend-compliance-ok);
+  border-color: var(--trend-compliance-ok);
+}
+
+.complianceOverdue {
+  background: transparent;
+  border: 2px solid var(--trend-compliance-overdue);
+}
+
+.complianceNone {
+  background: var(--trend-neutral);
+  border-color: var(--color-border);
+}
+
+.complianceWeekGap {
+  margin-left: 6px;
+}
+
+.complianceSelected {
+  outline: 2px solid var(--color-text);
+  outline-offset: 1px;
+}
+
+/* ---------- 空态与加载骨架 ---------- */
+
+.boardEmpty {
+  padding: var(--space-5);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+
+.emptyTitle {
+  margin: 0 0 var(--space-2);
+  font-weight: 600;
+}
+
+.emptyText {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.skeletonWrap {
+  margin-top: var(--space-3);
+}
+
+.skeletonList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.skeletonBar {
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+  animation: trendPulse 1.4s ease-in-out infinite;
+}
+
+.skeletonSummary {
+  height: 68px;
+}
+
+/* 与折叠按钮同高，避免加载完成时行高跳动。 */
+.skeletonButton {
+  height: 44px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+@keyframes trendPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+
+  .collapsePanel {
+    animation: none;
+  }
+
+  .skeletonBar {
+    animation: none;
+  }
+}

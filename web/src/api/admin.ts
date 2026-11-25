@@ -17,6 +17,7 @@ import type {
   SubjectFrequencyPayload,
   SubjectListItem,
   SubjectMediaData,
+  SubjectTrends,
   TicketDetail,
   TicketListItem,
   TransitionPayload,
@@ -132,6 +133,28 @@ export function getSubjectMedia(
     {
       role: "admin",
       query: date ? { date } : {},
+    },
+  );
+}
+
+/** api@1.5 §7.18：对象心理状态趋势，任意日期区间（缺省近 14 天）。 */
+export function getSubjectTrends(
+  subjectId: string,
+  startDate?: string,
+  endDate?: string,
+): Promise<Envelope<SubjectTrends>> {
+  const query: Record<string, string> = {};
+  if (startDate) {
+    query.start_date = startDate;
+  }
+  if (endDate) {
+    query.end_date = endDate;
+  }
+  return request<SubjectTrends>(
+    `/api/admin/subjects/${encodeURIComponent(subjectId)}/trends`,
+    {
+      role: "admin",
+      query,
     },
   );
 }
