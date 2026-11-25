@@ -138,12 +138,12 @@ class ProviderOutput:
 
 ### 4.2 四路 Provider
 
-| name | 目标真模型 | mock 行为 |
+| name | 目标真模型 | 当前实现 |
 |---|---|---|
-| `asr` | SenseVoice | 返回固定转写片段，写入 `transcript.txt` |
-| `emotion` | 语音情感模型 | 返回固定 `valence`/`arousal`/`label` |
-| `face` | 表情识别模型 | 返回固定 `expression_label`/`intensity` |
-| `psych` | PsyCoLLM | 消费 ASR 转写文本，返回固定 `signal_strength`/`intent_flag` |
+| `asr` | SenseVoice | 已接入真实 SenseVoice（`sensevoice-asr@1.0`），HTTP 失败回退 mock |
+| `emotion` | 语音情感模型 | 已接入（`sensevoice-emotion@1.0`）：复用 ASR 响应中的 `<|NEUTRAL|>` 等情感标签，不重复请求云端；无标签时标 `degraded` 并保留 mock 数值 |
+| `face` | 表情识别模型 | mock：返回固定 `expression_label`/`intensity` |
+| `psych` | PsyCoLLM | mock：消费 ASR 转写文本，返回固定 `signal_strength`/`intent_flag` |
 
 mock 输出必须**可通过场景参数切换**（如 `MOCK_SCENARIO=normal|negative|crisis|conflict`），否则无法覆盖分级分支与边界测试。
 
@@ -154,7 +154,7 @@ mock 输出必须**可通过场景参数切换**（如 `MOCK_SCENARIO=normal|neg
 | 单路 `available()` 为 False | 该路 `status=skipped`，整体 `degraded=true` |
 | 单路抛异常 | 该路 `status=degraded` + `reason`，整体 `degraded=true`，继续汇总 |
 | 四路全部失败 | 返回 `5000`，不生成分级、不生成任务 |
-| 超过单路超时（默认 10s） | 按 `degraded` 处理并终止该路 |
+| 超过单路超时（默认 120s，可由 `SENSEVOICE_TIMEOUT_SEC` 覆盖） | 按 `degraded` 处理并终止该路 |
 
 `degraded=true` 时仍走分级，但 `consistency` 最多为 `medium`，且强制 `needs_review=true`。
 

@@ -174,7 +174,7 @@
 | `app/api/` 用户端端点、consent 三闸、会话归属校验 | 已实现 | `4f5d1bf` |
 | `app/analysis/` 四路 mock、Schema 校验、一致性判定 | 已实现（未打标签） | `81a8499` |
 | `tests/test_analysis/`（69 条） | 全绿 | `81a8499`、`fa5a0d7` |
-| SenseVoice ASR Provider（真实 API + 10s 超时 + Mock 回退） | 已实现 | `fa5a0d7` |
+| SenseVoice ASR Provider（真实 API + 120s 超时 + Mock 回退） | 已实现 | `fa5a0d7` |
 | `app/grading/` 五色规则、七日趋势偏移、合成封顶、复核任务草案 | 已实现并接入 API（未打标签） | `67adee6`、`1d3fb0e` |
 | `tests/test_grading/`（108 条） | 全绿 | `67adee6`、`1d3fb0e` |
 | `web/` 用户端 3 页 + 管理端 4 页骨架（mock 联调） | 已实现 | `601d33d` |
@@ -258,9 +258,9 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 - `POST /api/sessions/{id}/analyze` 已正式接入（`c46536e`）：`captured` 跑四路分析并落 `analysis_json` / `transcript_path` / `analysis_status`，再按自然日窗口生成 `reviews` / `review_tickets`；分析彻底失败 `2003` 且不改 `sessions.status`；重复调用幂等；
 - 新增管理端端点（`c46536e`）：`POST /api/admin/reviews`（0 可用会话 → `1005 no_session_in_window`）、`GET /api/admin/reviews/{id}`、`GET /api/admin/tickets`、`GET /api/admin/tickets/{id}`（写 `sensitive.view`）、`POST /api/admin/tickets/{id}/transition`、`GET /api/admin/dashboard`（`subject_id` 可选，缺省取最近采集对象）。
 
-分析模块（`app/analysis/`，全部 mock）已落地的要点：
+分析模块（`app/analysis/`，mock 为主、ASR 与语音情绪已接真实）已落地的要点：
 
-- 四路 Provider：`mock-asr@1.0` / `mock-emotion@1.0` / `mock-face@1.0` / `mock-psych@1.0`，场景 `normal` / `negative` / `crisis` / `conflict` 确定性输出；
+- 四路 Provider：`mock-asr@1.0` / `mock-emotion@1.0` / `mock-face@1.0` / `mock-psych@1.0`，场景 `normal` / `negative` / `crisis` / `conflict` 确定性输出（现况：`asr` 已接 `sensevoice-asr@1.0`，`emotion` 已接 `sensevoice-emotion@1.0`，`face` / `psych` 仍为 mock）；
 - ASR 生成会话内 `transcript.txt`，结果只存规范相对路径，不返回原文；
 - 运行状态与结果分离：`AnalysisRunResult.analysis_status` 为 `done/degraded/failed`，纯 `AnalysisResult` 不含该字段；
 - 通道级与完整 JSON Schema 校验（Draft 2020-12 + `FormatChecker`），失败不得进入 grading；
@@ -296,8 +296,9 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 | **异常日志不写异常原文** | api@1.4 §2、[errors.py](../app/api/errors.py) | 只记 `request_id/exception_type/endpoint`，避免绝对路径或 SQL 参数进日志；`DEBUG=1` 才把堆栈打到 stdout |
 | **后台采集可注入 + `CAPTURE_FAKE`** | [sessions.py](../app/api/routers/sessions.py)、[deps.py](../app/api/deps.py) | 测试不触真实摄像头；session factory 可替换，后台任务可观测 |
 | **SQLAlchemy 临时锁 `<2.1`** | [requirements.txt](../requirements.txt)、[migrations/README](../app/db/migrations/README.md) | 2.1.x 开启外键时多表同事务 flush 顺序错误（QA M1）；seed 的逐表 flush 作为双保险 |
-| **分析默认 mock Provider，ASR 可选真实 SenseVoice** | [prd.md](./prd.md#L33)、[sensevoice_asr.py](../app/analysis/providers/sensevoice_asr.py) | 原型阶段先跑通链路与契约；`SENSEVOICE_API_URL`/`SENSEVOICE_API_KEY` 齐备时 ASR 走真实 API，其余通道仍 mock |
-| **SenseVoice 失败回退 Mock + degraded** | [sensevoice_asr.py](../app/analysis/providers/sensevoice_asr.py)、[providers/__init__.py](../app/analysis/providers/__init__.py) | 10s 超时；超时/4xx/5xx/解析失败一律回退 Mock 并标 `degraded / sensevoice_fallback`，管线不中断；ASR 非 ok 时 psych 按既有契约 `skipped/asr_unavailable` |
+| **分析默认 mock Provider，ASR/情绪可选真实 SenseVoice** | [prd.md](./prd.md#L33)、[sensevoice_asr.py](../app/analysis/providers/sensevoice_asr.py) | 原型阶段先跑通链路与契约；`SENSEVOICE_API_URL`/`SENSEVOICE_API_KEY` 齐备时 ASR 走真实 API、emotion 复用其情绪标签，face/psych 仍 mock |
+| **emotion 复用 ASR 情绪标签（零额外请求）** | [sensevoice_asr.py](../app/analysis/providers/sensevoice_asr.py) `_parse_emotion`、[sensevoice_emotion.py](../app/analysis/providers/sensevoice_emotion.py)、[pipeline.py](../app/analysis/pipeline.py) | 从 `<|NEUTRAL|>` 等标签映射 `valence/arousal/label`；ASR Provider 经 `last_emotion` 交给 emotion 通道，不重复调用云端；标签缺失时标 `degraded` 并保留 mock 数值，避免占位值被当成真实情绪 |
+| **SenseVoice 失败回退 Mock + degraded** | [sensevoice_asr.py](../app/analysis/providers/sensevoice_asr.py)、[providers/__init__.py](../app/analysis/providers/__init__.py) | 默认 120s 超时（`SENSEVOICE_TIMEOUT_SEC` 可覆盖）；超时/4xx/5xx/解析失败一律回退 Mock 并标 `degraded / sensevoice_fallback`，管线不中断；ASR 非 ok 时 psych 按既有契约 `skipped/asr_unavailable`，emotion 因无标签复用标 `degraded / sensevoice_emotion_unavailable` |
 | **运行时只读 `os.environ`，不自动加载 `.env`** | [sensevoice_asr.py](../app/analysis/providers/sensevoice_asr.py)、[tests/test_analysis/conftest.py](../tests/test_analysis/conftest.py) | 仓库无 dotenv 依赖；避免测试误读真实 Key 触网；测试以 autouse fixture 清 env，HTTP 全部 mock 拦截 |
 | **分析运行状态与结果分离** | [models.py](../app/analysis/models.py)、[pipeline.py](../app/analysis/pipeline.py) | `AnalysisResult` 严格对齐 schema；`done/degraded/failed` 放在独立包装层，失败不产出可进入 grading 的结果 |
 | **`risk_level` 映射落在 grading config 并已 wiring** | [config.py](../app/grading/config.py) `map_risk_level`、[pipeline.py](../app/analysis/pipeline.py) | 按 `text_valence` 分段 + 明确意图覆写 `crisis`；`c46536e` 删除 `pending` 占位，pipeline 直接调用 `map_risk_level` |
@@ -319,7 +320,7 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 
 | 目录 | 内容 | 状态 |
 |---|---|---|
-| `app/analysis/` | 四路 mock、Schema 校验、一致性判定 | 已实现；ASR 已接 SenseVoice（`fa5a0d7`），emotion/face/psych 真模型待接；`risk_level` 已 wiring `map_risk_level`（`c46536e`） |
+| `app/analysis/` | 四路 Provider、Schema 校验、一致性判定 | 已实现；ASR 已接 SenseVoice（`fa5a0d7`），emotion 复用 ASR 情绪标签接入（`sensevoice-emotion@1.0`），face/psych 仍为 mock；`risk_level` 已 wiring `map_risk_level`（`c46536e`） |
 | `app/grading/` | 五色规则、七日趋势偏移、合成封顶、复核任务草案 | 已实现并接入 API（`c46536e`）；低一致性 P0 已补 |
 | `app/api/` | analyze / reviews / tickets / dashboard | 已接入（`c46536e`）；余项见下 |
 | `web/` | 用户端页面 + 管理端列表/详情/复核任务 | 骨架已实现（`601d33d`），双模块与手动录音已落地（`8013d4e`）；P11 新增两个占位入口、P12 登录页、P13 同步面板、P14 详情档案/媒体/看板合并已提交；P15 本地化与术语统一在工作区；待与真实 API 联调 |
@@ -353,14 +354,14 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 3. **`window_days` 默认值只影响新建表**：reviews 端点落地前需重建 `storage/app.db`（当前库已按 db@1.4 重建过一次）。
 4. **500 响应缺 CORS 头**：未捕获异常由最外层 `ServerErrorMiddleware` 处理，浏览器跨域读不到该信封；`X-Request-Id` 与 `request_id` 仍在。
 5. **麦克风音量**：本机默认输入曾长期近乎静音（峰值 7/32768、`speech_ratio=0`），最后一次正式验证为 `ok`（`speech_ratio=0.3153`），现场部署前需复核设备与增益。
-6. **emotion/face/psych 真模型未接**：仍为确定性 mock，Provider 选型与降级策略待确认；ASR 已接 SenseVoice（真实 URL/Key 在本机 `.env`，运行时需注入 `os.environ`）。
+6. **face/psych 真模型未接**：仍为确定性 mock。ASR 已接 SenseVoice、emotion 已复用其情绪标签（`sensevoice-emotion@1.0`，标记缺失时 `degraded` + `sensevoice_emotion_unavailable`）；face/psych 的 Provider 选型与降级策略待确认（真实 URL/Key 在本机 `.env`，运行时需注入 `os.environ`）。
 7. **`risk_level` 已 wiring**：`generate_overall_risk_level(text_valence, intent_flag)` 直接返回 `map_risk_level`；阈值仍全部 `# TODO: 待标定`，正式上线前需业务确认。
 8. **部署需安装新依赖**：`requirements.txt` 已加入 `jsonschema[format]>=4.23,<5`，本地已安装，其他环境需重新安装。
 9. **文档漂移**：[architecture.md](./architecture.md#L53) 的存储路径仍是 `storage/{subject_id}/{session_id}/`，与 capture@1.2 不一致。
 10. **`capture_busy` 暂复用 `code=5000`**（`message=capture_busy`），尚无专用业务码。
 11. **契约已同步（2026-11-24）**：`grading.md` 补记规则 5 P0、复盘前提、复核任务主键归属与覆写顺序；`api.md` 补记 analyze / reviews / tickets / dashboard、窗口 `YYYY-MM-DD`、`1005 no_session_in_window`、consent 强校验；`ui.md` §3.1 统一两项齐备；`db.md` 补窗口格式与 0 会话不落库。版本号均保持不变（附加、非破坏）。同日追加：`ui.md` 补记 2（一次性授权、去保存期限）、`api.md` §7.1.2 `retention_days` 可选缺省 180；双模块追加 `ui.md` 补记 3、`api.md` 补记·二、`grading.md` 补记·三、`capture.md` 补记（face_only）、`db.md` 补记（kind/频率/`review_id` 可空/`detail_json`/`talk_to_staff`/`frequency.update`）、`analysis.schema.json` degraded 描述 checkin 例外（已提交）。
 12. **管理端前端仍用 mock**：`web/src/api/*` 已声明端点，但管理端页面尚未切真实 API（P14 的档案与媒体也仅 mock）；用户端 consent 已完成两项齐备门禁、一次性授权与去保存期限。
-13. **analyze 为同步长请求**：mock 下可接受；ASR 真实 API 已有 10s 超时 + Mock 回退；后续接其余真模型需评估超时或改后台任务，并复用 `deps.get_session_factory()` 注入。
+13. **analyze 为同步长请求**：mock 下可接受；ASR 真实 API 超时默认 120s（`SENSEVOICE_TIMEOUT_SEC` 可覆盖，实测冷启约 20s、热调用约 3.5s），失败回退 Mock；后续接其余真模型需评估超时或改后台任务，并复用 `deps.get_session_factory()` 注入。
 14. **本机库需执行双模块迁移**：`app/db/migrations/202611241200_add_dual_module_tasks.py`（`python -m app.db.migrations.202611241200_add_dual_module_tasks`）；`storage/app.db` **已执行**该迁移与 P13 的 `202611251200_add_sensevoice_syncs.py`，旧库直接启动会缺 `kind`/频率列/`sensevoice_syncs` 表。
 15. **手动录音未做真实设备联调**：手动闭环已由 fake + 单元测试覆盖（不自动终止、stop 后落盘）；真实麦克风长时间录音的资源占用与 stop 响应时延需现场验证。
 16. **登录为开发演示账号**：`张三 / 123456` 由前端校验并写入 localStorage，密码会出现在打包产物中，**不可用于生产**；生产需接入真实认证。真实后端模式需 `VITE_USE_MOCK=0`、启动 uvicorn 并先执行 `seed_demo.py`，否则默认演示对象 S001 不存在会返回 `1004`。
@@ -421,11 +422,11 @@ python scripts\verify_capture.py --device 0 --seconds 5 --out storage/_debug   #
 git push origin main                                                 # 远程为 ssh.github.com:443（22 端口被阻断）
 ```
 
-测试构成：`tests/test_capture/` 14 条（含 face_only、手动录音 stop_event 闭环与 fake 闭环）、`tests/test_db/` 21 条（含 3 条约束负例、双模块默认值/CHECK/索引/迁移回填）、`tests/test_api/` 74 条（含用户端 / consent / 归属 / 假采集 / 失败 / 并发 / 生产守卫 / analyze 接入 / 复盘 / 复核任务 / 看板 / retention 缺省 / 双模块 kind / tasks / frequency / 逾期幂等 / 序列化字段 / 手动 stop 全流程与异常分支 / P13 同步 13 条）、`tests/test_analysis/` 69 条（含场景、单模态、降级隔离、Schema、一致性、确定性与隐私、SenseVoice 九项 mock 拦截、checkin 预期 skipped 与一致性豁免）、`tests/test_grading/` 108 条（单次/趋势边界、封顶矩阵、取大六组合、复核任务字段与 due_at、低一致性 P0、幂等、`map_risk_level`、配置不变量）。
+测试构成（共 334 条）：`tests/test_capture/` 14 条（含 face_only、手动录音 stop_event 闭环与 fake 闭环）、`tests/test_db/` 21 条（含 3 条约束负例、双模块默认值/CHECK/索引/迁移回填）、`tests/test_api/` 105 条（含用户端 / consent / 归属 / 假采集 / 失败 / 并发 / 生产守卫 / analyze 接入 / 复盘 / 复核任务 / 看板 / retention 缺省 / 双模块 kind / tasks / frequency / 逾期幂等 / 序列化字段 / 手动 stop 全流程与异常分支 / P13 同步 13 条）、`tests/test_analysis/` 86 条（含场景、单模态、降级隔离、Schema、一致性、确定性与隐私、SenseVoice ASR 11 条与情绪标签 15 条 mock 拦截、checkin 预期 skipped 与一致性豁免）、`tests/test_grading/` 108 条（单次/趋势边界、封顶矩阵、取大六组合、复核任务字段与 due_at、低一致性 P0、幂等、`map_risk_level`、配置不变量）。
 
 ## 10. 待确认清单
 
-- emotion/face/psych 的真实 Provider 选型与降级策略（ASR 已定 SenseVoice + Mock 回退）；
+- face/psych 的真实 Provider 选型与降级策略（ASR 已定 SenseVoice + Mock 回退；emotion 已定复用 ASR 情绪标签，不重复请求云端）；
 - `map_risk_level` 的 `text_valence` 分段阈值权威来源（已定义于 `app/grading/config.py`，全部 `# TODO: 待标定`；已 wiring 进 pipeline，阈值仍待业务确认）；
 - 一致性阈值从 `app/analysis/config.py` 迁到 `app/grading/config.py` 的适配时机（grading 侧已定义权威值 0.6，analysis 仍用本地常量）；
 - 是否为 `app/analysis/` 打标签（如 `analysis-v1`）；
@@ -436,7 +437,7 @@ git push origin main                                                 # 远程为
 - 正式验证用的 `subject_id` 目前是固定 UUID（`3b1e7c90-...`），是否保留为演示对象；
 - 是否将本机 SQLAlchemy 重装到 `<2.1` 以彻底消除 M1 现象；
 - `CAPTURE_FAKE` 是否增加 `APP_ENV != production` 守卫；
-- SenseVoice 情绪分析接口协议、字段映射与置信度口径（当前 `emotion@1.0` 为防御式适配，待真实服务确认）；
+- SenseVoice 情绪分析接口协议与字段映射（思想汇报同步用的独立情绪接口仍待真实服务确认）；analysis 的 `emotion` 通道已改为复用 ASR 情绪标签（`sensevoice-emotion@1.0`），置信度为经验值 `0.75`，待业务标定；
 - 对象档案字段范围与身份证号脱敏规则（是否展示完整号码、谁能查看、是否留痕）；
 - 对象按日媒体端点的鉴权、留存期与 `audit_logs` 留痕口径；
 - 单对象 dashboard（`subject_id` 变体）的返回语义与失败降级方式；

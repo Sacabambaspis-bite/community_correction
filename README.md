@@ -2,7 +2,7 @@
 
 > 单对象纵向切片原型：把一次采集（人脸 + 语音）转成结构化信号，经四路分析与五色分级，**分级结果唯一出口是人工复核任务**。系统自身不产生任何处置动作。
 
-- 当前状态：原型（非生产可用），核心链路已打通，分析侧除 ASR 外仍为确定性 Mock。
+- 当前状态：原型（非生产可用），核心链路已打通，分析侧除 ASR 与语音情绪外仍为确定性 Mock。
 - 最近验证：`pytest tests -q` → 286 passed；`web` 的 `typecheck` 与 `build` 通过。
 - 进度与风险：[docs/PROGRESS.md](./docs/PROGRESS.md)
 - 产品与架构：[docs/prd.md](./docs/prd.md)、[docs/architecture.md](./docs/architecture.md)
@@ -35,7 +35,7 @@
 | 采集 | 摄像头抓拍、人脸检测与裁剪、麦克风录音、会话打包（`meta.json`） | 已实现，真机验证 |
 | 采集模式 | `both`（人脸+语音）、`face_only`（签到）、手动录音（用户点击结束才停止） | 已实现 |
 | 数据层 | 5 张表、派生 `coverage`、服务端默认值、手工迁移 | 已实现 |
-| 分析 | 四路 Provider + Schema 校验 + 一致性判定 + 降级隔离 | 已实现（ASR 可接真实 SenseVoice） |
+| 分析 | 四路 Provider + Schema 校验 + 一致性判定 + 降级隔离 | 已实现（ASR 与语音情绪已接真实 SenseVoice，人脸/心理为 mock） |
 | 分级 | 单次规则、七日趋势、合成封顶、复核任务草案 | 已实现 |
 | API | 统一响应信封、双 token 鉴权、采集/分析/复盘/复核任务/看板 | 已实现 |
 | 业务形态 | 刷脸签到、录音思想汇报、按对象配置频率、逾期 → P0 复核任务 | 已实现 |
@@ -80,7 +80,7 @@ community-correction/
 │  ├─ capture/              # 采集：摄像头、人脸、录音、会话打包
 │  ├─ db/                   # ORM 模型、连接、建库、手工迁移
 │  ├─ analysis/             # 四路 Provider、Schema 校验、一致性
-│  │  └─ providers/         # mock_asr / mock_emotion / mock_face / mock_psych / sensevoice_asr
+│  │  └─ providers/         # mock_asr / mock_emotion / mock_face / mock_psych / sensevoice_asr / sensevoice_emotion
 │  ├─ grading/              # 五色规则、趋势、合成、复核任务草案（纯函数）
 │  └─ api/                  # FastAPI 应用、路由、依赖、错误信封、集成层
 │     └─ routers/           # health / sessions / user / admin
@@ -209,6 +209,7 @@ uvicorn app.api.main:app --port 8000
 | `CAPTURE_MIN_SPEECH_RATIO` | `0.05` | 有效语音占比阈值 |
 | `SENSEVOICE_API_URL` | 空 | 与 `SENSEVOICE_API_KEY` 同时配置才启用真实 ASR |
 | `SENSEVOICE_API_KEY` | 空 | 同上；请勿提交到仓库 |
+| `SENSEVOICE_TIMEOUT_SEC` | `120` | 单次 ASR 请求超时（秒）；超时按 `degraded` 降级为 Mock |
 | `DEEPSEEK_API_KEY` | 空 | 配置后才启用 AI 援助；未配置时接口返回中性提示，不报 500 |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | OpenAI 兼容地址 |
 | `DEEPSEEK_MODEL` | `deepseek-flash` | 固定非思考模式，配合内置联网搜索 |
@@ -537,7 +538,7 @@ npm run build
 
 | 限制 | 说明 |
 |---|---|
-| 分析模型 | 除 ASR 外（SenseVoice 可选），情绪 / 表情 / 心理均为确定性 Mock，阈值为 `TODO: 待标定` |
+| 分析模型 | ASR 已接 SenseVoice；语音情绪复用 ASR 情绪标签（`sensevoice-emotion@1.0`）；表情 / 心理仍为确定性 Mock，阈值为 `TODO: 待标定`。因心理通道未接真模型，风险等级、五色与趋势结论暂不可用于真实判断 |
 | 前端联调 | 默认 mock；管理端尚未整体切换真实接口 |
 | 未实现端点 | 复盘列表 `GET /api/admin/reviews`、转写查看、60 秒频控（`1006`） |
 | 同步分析 | `analyze` 为同步长请求，原型阶段可接受 |
