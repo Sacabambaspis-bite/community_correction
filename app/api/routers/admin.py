@@ -4,22 +4,33 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.analysis.errors import AnalysisInputError
+from app.analysis.paths import resolve_session_file
+from app.analysis.sensevoice_sync import (
+    SensevoiceSyncError,
+    sync_configured,
+    sync_report,
+)
 from app.api.deps import get_db, require_admin
 from app.api.errors import (
+    AI_UNAVAILABLE,
     INTERNAL_ERROR,
     INVALID_REQUEST,
     NOT_FOUND,
     STATE_CONFLICT,
+    SYNC_FAILED,
     BizError,
     current_request_id,
     envelope,
@@ -36,6 +47,11 @@ from app.api.integration import (
 from app.api.schemas import (
     DashboardOut,
     ReviewCreateRequest,
+    SensevoiceSyncDetailOut,
+    SensevoiceSyncItemOut,
+    SensevoiceSyncListOut,
+    SensevoiceSyncOut,
+    SensevoiceSyncRequest,
     SessionListItem,
     SessionListOut,
     SubjectFrequencyOut,
@@ -50,7 +66,14 @@ from app.api.schemas import (
     TrendPointOut,
 )
 from app.capture.config import STORAGE_ROOT
-from app.db.models import AuditLog, CaptureSession, Review, ReviewTicket, Subject
+from app.db.models import (
+    AuditLog,
+    CaptureSession,
+    Review,
+    ReviewTicket,
+    SensevoiceSync,
+    Subject,
+)
 
 logger = logging.getLogger("app.api")
 
@@ -62,6 +85,22 @@ _TICKET_STATUSES = frozenset({"pending", "confirmed", "corrected", "closed"})
 _PRIORITIES = frozenset({"P0", "P1", "P2"})
 _COLORS = ("green", "blue", "yellow", "orange", "red")
 _WINDOW_END_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+#: 思想汇报同步开关；默认关闭，只有显式真值才启用（大小写不敏感）。
+_SENSEVOICE_SYNC_ENV = "SENSEVOICE_SYNC_ENABLED"
+_SENSEVOICE_SYNC_TRUTHY = frozenset({"1", "true", "yes", "on"})
+#: SensevoiceSyncError.code → 业务码（api.md §7.15）。
+_SENSEVOICE_ERROR_CODES = {
+    "sensevoice_unavailable": AI_UNAVAILABLE,
+    "transcription_failed": SYNC_FAILED,
+    "emotion_failed": SYNC_FAILED,
+}
+
+
+def _sensevoice_sync_enabled() -> bool:
+    """读取功能开关；缺省 `"0"`，仅 1/true/yes/on 视为开启。"""
+    raw = os.environ.get(_SENSEVOICE_SYNC_ENV, "0")
+    return raw.strip().lower() in _SENSEVOICE_SYNC_TRUTHY
 
 
 def _now() -> str:
@@ -689,5 +728,228 @@ def dashboard(
             pending_tickets=pending_tickets,
             last_session_at=last_session_at,
             overdue={kind: state["overdue"] for kind, state in states.items()},
+        ).model_dump()
+    )
+
+
+# ---- 思想汇报同步（api.md §7.15 / §7.16 / §7.17）----
+
+
+def _sync_item_fields(sync: SensevoiceSync) -> dict:
+    """列表项与 POST 响应共用的同步摘要（不含转写与情绪片段）。"""
+    return {
+        "sync_id": sync.id,
+        "subject_id": sync.subject_id,
+        "session_id": sync.session_id,
+        "status": sync.status,
+        "provider": sync.provider,
+        "emotion_primary": sync.emotion_primary,
+        "emotion_confidence": sync.emotion_confidence,
+        "data_version": sync.data_version,
+        "operator": sync.operator,
+        "created_at": sync.created_at,
+    }
+
+
+def _latest_report_session(db: Session, subject_id: str) -> Optional[CaptureSession]:
+    """对象最近一次可用汇报会话：report + captured + 有音频。"""
+    return db.scalars(
+        select(CaptureSession)
+        .where(
+            CaptureSession.subject_id == subject_id,
+            CaptureSession.kind == "report",
+            CaptureSession.status == "captured",
+            CaptureSession.audio_path.is_not(None),
+        )
+        .order_by(desc(CaptureSession.captured_at))
+        .limit(1)
+    ).first()
+
+
+@router.post("/subjects/{subject_id}/sensevoice-sync")
+def sync_subject_report(
+    subject_id: str,
+    payload: Optional[SensevoiceSyncRequest] = None,
+    _role: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    subject = db.get(Subject, subject_id)
+    if subject is None:
+        raise BizError(NOT_FOUND, "not_found")
+
+    requested_session_id = payload.session_id if payload is not None else None
+    session: Optional[CaptureSession] = None
+    if requested_session_id:
+        session = db.get(CaptureSession, requested_session_id)
+        if session is None or session.subject_id != subject_id:
+            raise BizError(NOT_FOUND, "not_found")
+
+    # 开关关闭时直接返回，不查会话产物、不落库、不写审计。
+    if not _sensevoice_sync_enabled():
+        raise BizError(AI_UNAVAILABLE, "sensevoice_sync_disabled")
+
+    if requested_session_id:
+        if (
+            session.kind != "report"
+            or session.status != "captured"
+            or not session.audio_path
+        ):
+            raise BizError(STATE_CONFLICT, "no_report_audio")
+    else:
+        session = _latest_report_session(db, subject_id)
+        if session is None:
+            raise BizError(STATE_CONFLICT, "no_report_audio")
+
+    if not sync_configured():
+        raise BizError(AI_UNAVAILABLE, "sensevoice_unavailable")
+
+    try:
+        audio_file = resolve_session_file(
+            Path(STORAGE_ROOT), subject_id, session.id, session.audio_path
+        )
+    except AnalysisInputError:
+        db.rollback()
+        raise BizError(STATE_CONFLICT, "no_report_audio") from None
+    try:
+        audio_size = audio_file.stat().st_size if audio_file.is_file() else 0
+    except OSError:
+        audio_size = 0
+    if audio_size <= 0:
+        db.rollback()
+        raise BizError(STATE_CONFLICT, "no_report_audio")
+
+    try:
+        result = sync_report(audio_file, duration_sec=session.duration_sec)
+    except SensevoiceSyncError as exc:
+        db.rollback()
+        raise BizError(
+            _SENSEVOICE_ERROR_CODES.get(exc.code, SYNC_FAILED), exc.code
+        ) from None
+
+    emotion = result.emotion if isinstance(result.emotion, dict) else {}
+    primary = emotion.get("primary")
+    primary = primary if isinstance(primary, str) else None
+    raw_confidence = emotion.get("confidence")
+    confidence: Optional[float] = None
+    if isinstance(raw_confidence, (int, float)) and not isinstance(
+        raw_confidence, bool
+    ):
+        confidence = float(raw_confidence)
+
+    now = _now()
+    sync = SensevoiceSync(
+        id=str(uuid4()),
+        subject_id=subject_id,
+        session_id=session.id,
+        status="succeeded",
+        provider=result.provider,
+        transcript_text=result.transcript_text,
+        transcript_language=result.transcript_language,
+        emotion_json=json.dumps(emotion, ensure_ascii=False),
+        emotion_primary=primary,
+        emotion_confidence=confidence,
+        data_version=result.data_version,
+        operator="staff",
+        error_code=None,
+        error_message=None,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(sync)
+    # detail_json 只允许版本与来源会话，禁止写入转写原文。
+    db.add(
+        AuditLog(
+            actor_type="staff",
+            actor_id=None,
+            action="sensevoice.sync",
+            target_type="sensevoice_sync",
+            target_id=sync.id,
+            detail_json=json.dumps(
+                {
+                    "session_id": session.id,
+                    "data_version": result.data_version,
+                    "operator": "staff",
+                }
+            ),
+            request_id=current_request_id(),
+            created_at=now,
+        )
+    )
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise BizError(INTERNAL_ERROR, "sync_write_failed") from None
+
+    return envelope(data=SensevoiceSyncOut(**_sync_item_fields(sync)).model_dump())
+
+
+@router.get("/subjects/{subject_id}/sensevoice-syncs")
+def list_sensevoice_syncs(
+    subject_id: str,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    _role: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    subject = db.get(Subject, subject_id)
+    if subject is None:
+        raise BizError(NOT_FOUND, "not_found")
+
+    condition = SensevoiceSync.subject_id == subject_id
+    total = db.scalar(
+        select(func.count()).select_from(SensevoiceSync).where(condition)
+    ) or 0
+    rows = db.scalars(
+        select(SensevoiceSync)
+        .where(condition)
+        .order_by(desc(SensevoiceSync.created_at))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+
+    items = [SensevoiceSyncItemOut(**_sync_item_fields(row)) for row in rows]
+    return envelope(
+        data=SensevoiceSyncListOut(
+            items=items, page=page, page_size=page_size, total=total
+        ).model_dump()
+    )
+
+
+@router.get("/sensevoice-syncs/{sync_id}")
+def get_sensevoice_sync(
+    sync_id: str,
+    _role: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    sync = db.get(SensevoiceSync, sync_id)
+    if sync is None:
+        raise BizError(NOT_FOUND, "not_found")
+
+    db.add(
+        AuditLog(
+            actor_type="staff",
+            actor_id=None,
+            action="sensitive.view",
+            target_type="sensevoice_sync",
+            target_id=sync.id,
+            detail_json=json.dumps({"field": "transcript"}),
+            request_id=current_request_id(),
+            created_at=_now(),
+        )
+    )
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise BizError(INTERNAL_ERROR, "audit_write_failed") from None
+
+    return envelope(
+        data=SensevoiceSyncDetailOut(
+            **_sync_item_fields(sync),
+            transcript_text=sync.transcript_text,
+            transcript_language=sync.transcript_language,
+            emotion=_load_json_obj(sync.emotion_json),
+            updated_at=sync.updated_at,
         ).model_dump()
     )

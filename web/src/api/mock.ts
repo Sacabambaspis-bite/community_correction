@@ -9,7 +9,9 @@ import ticketMock from "../mock/ticket.json";
 import { SUBJECT_ID } from "../lib/env";
 import type {
   AdminSessionItem,
+  CaptureStatus,
   ConsentData,
+  DailyMedia,
   DashboardData,
   Envelope,
   FeedbackData,
@@ -18,9 +20,11 @@ import type {
   SessionCreateData,
   SessionData,
   SessionKind,
+  SubjectDetail,
   SubjectFrequencyData,
   SubjectFrequencyPayload,
   SubjectListItem,
+  SubjectProfileFields,
   TicketDetail,
   TicketListItem,
   TransitionPayload,
@@ -35,7 +39,28 @@ type MockOptions = {
   body?: unknown;
 };
 
-const subjects = subjectMock as unknown as Paged<SubjectListItem>;
+type RawDailyMedia = {
+  date: string;
+  checkin: {
+    checkin_id: string;
+    captured_at: string;
+    capture_status: CaptureStatus | null;
+    image_prompt: string | null;
+  } | null;
+  report: {
+    report_id: string;
+    submitted_at: string;
+    duration_sec: number | null;
+    audio_available: boolean;
+  } | null;
+};
+
+type SubjectMockFile = Paged<SubjectListItem> & {
+  profiles: Record<string, Partial<SubjectProfileFields>>;
+  media: Record<string, RawDailyMedia[]>;
+};
+
+const subjects = subjectMock as unknown as SubjectMockFile;
 const sessions = sessionMock as unknown as {
   detail: SessionData;
   failed: SessionData;
@@ -47,7 +72,9 @@ const tickets = ticketMock as unknown as {
   detail: TicketDetail;
   transition: TransitionResult;
 };
-const dashboard = dashboardMock as unknown as DashboardData;
+const dashboardFile = dashboardMock as unknown as Omit<DashboardData, "overdue"> & {
+  variants?: Record<string, Omit<DashboardData, "overdue">>;
+};
 const review = reviewMock as unknown as ReviewDetail;
 
 const adminSessionItems: AdminSessionItem[] = [
@@ -85,14 +112,49 @@ const subjectFrequencies = new Map<string, SubjectFrequencyData>();
 const SESSION_MOCK_DELAY_MS = 1200;
 
 let requestSeq = 0;
-let consentState: ConsentData = {
-  subject_id: SUBJECT_ID,
-  general: { granted: false, at: null },
-  face: { granted: false, at: null },
-  audio: { granted: false, at: null },
-  revoked_at: null,
-  retention_days: null,
-};
+
+/* Mock 模式下的同意状态持久化：刷新页面后仍能保持登录后的同意结果。 */
+const MOCK_CONSENT_KEY = "cc.mock.consent";
+
+function defaultConsent(): ConsentData {
+  return {
+    subject_id: SUBJECT_ID,
+    general: { granted: false, at: null },
+    face: { granted: false, at: null },
+    audio: { granted: false, at: null },
+    revoked_at: null,
+    retention_days: null,
+  };
+}
+
+function loadMockConsent(): ConsentData {
+  try {
+    const raw = window.localStorage.getItem(MOCK_CONSENT_KEY);
+    if (!raw) {
+      return defaultConsent();
+    }
+    const parsed = JSON.parse(raw) as ConsentData;
+    if (
+      parsed.subject_id !== SUBJECT_ID ||
+      typeof parsed.general?.granted !== "boolean"
+    ) {
+      return defaultConsent();
+    }
+    return parsed;
+  } catch {
+    return defaultConsent();
+  }
+}
+
+function saveMockConsent(state: ConsentData): void {
+  try {
+    window.localStorage.setItem(MOCK_CONSENT_KEY, JSON.stringify(state));
+  } catch {
+    // 存储不可用时仅影响刷新后的表现，不阻断本次操作。
+  }
+}
+
+let consentState: ConsentData = loadMockConsent();
 const startedAt = new Map<string, number>();
 const stopRequestedAt = new Map<string, number>();
 const manualSessionIds = new Set<string>();
@@ -318,6 +380,116 @@ function subjectSummary(item: SubjectListItem): SubjectListItem {
   };
 }
 
+function profileOf(subjectId: string): SubjectProfileFields {
+  return {
+    gender: null,
+    age: null,
+    id_card: null,
+    phone: null,
+    address: null,
+    correction_type: null,
+    start_date: null,
+    end_date: null,
+    ...subjects.profiles[subjectId],
+  };
+}
+
+function dashboardFor(subjectId: string): Omit<DashboardData, "overdue"> {
+  const variant = dashboardFile.variants?.[subjectId];
+  if (variant) {
+    return variant;
+  }
+  return {
+    subject_id: subjectId,
+    color_distribution: dashboardFile.color_distribution,
+    trend_7d: dashboardFile.trend_7d,
+    pending_tickets: dashboardFile.pending_tickets,
+    last_session_at: dashboardFile.last_session_at,
+  };
+}
+
+const mockAudioCache = new Map<string, string>();
+
+function writeAscii(view: DataView, offset: number, text: string): void {
+  for (let index = 0; index < text.length; index += 1) {
+    view.setUint8(offset + index, text.charCodeAt(index));
+  }
+}
+
+/** 原型占位录音：2 秒 8kHz 单声道提示音，仅用于演示音频播放器。 */
+function mockAudioUrl(seed: string): string {
+  const cached = mockAudioCache.get(seed);
+  if (cached) {
+    return cached;
+  }
+  const seconds = 2;
+  const rate = 8000;
+  const total = seconds * rate;
+  const buffer = new ArrayBuffer(44 + total * 2);
+  const view = new DataView(buffer);
+  writeAscii(view, 0, "RIFF");
+  view.setUint32(4, 36 + total * 2, true);
+  writeAscii(view, 8, "WAVE");
+  writeAscii(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeAscii(view, 36, "data");
+  view.setUint32(40, total * 2, true);
+
+  const baseFreq = 300 + (seed.charCodeAt(0) % 5) * 40;
+  for (let index = 0; index < total; index += 1) {
+    const time = index / rate;
+    const envelope = Math.min(1, time * 8) * Math.max(0, 1 - time / seconds);
+    const value = Math.sin(2 * Math.PI * baseFreq * time) * envelope * 0.18;
+    view.setInt16(44 + index * 2, Math.round(value * 32767), true);
+  }
+
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  for (let index = 0; index < bytes.length; index += 1) {
+    binary += String.fromCharCode(bytes[index]);
+  }
+  const url = `data:audio/wav;base64,${btoa(binary)}`;
+  mockAudioCache.set(seed, url);
+  return url;
+}
+
+function mockImageUrl(prompt: string | null): string | null {
+  if (!prompt) {
+    return null;
+  }
+  return `https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=${encodeURIComponent(prompt)}&image_size=portrait_4_3`;
+}
+
+function dailyMediaOf(raw: RawDailyMedia): DailyMedia {
+  return {
+    date: raw.date,
+    checkin: raw.checkin
+      ? {
+          checkin_id: raw.checkin.checkin_id,
+          captured_at: raw.checkin.captured_at,
+          capture_status: raw.checkin.capture_status,
+          image_url: mockImageUrl(raw.checkin.image_prompt),
+        }
+      : null,
+    report: raw.report
+      ? {
+          report_id: raw.report.report_id,
+          submitted_at: raw.report.submitted_at,
+          duration_sec: raw.report.duration_sec,
+          audio_url: raw.report.audio_available
+            ? mockAudioUrl(raw.report.report_id)
+            : null,
+        }
+      : null,
+  };
+}
+
 function taskState(subjectId: string, kind: SessionKind): UserTaskData {
   const history = allAdminSessions();
   let lastCompletedAt: string | null = null;
@@ -399,6 +571,7 @@ export async function mockRequest<T>(
       revoked_at: null,
       retention_days: 180,
     };
+    saveMockConsent(consentState);
     return ok<T>(consentState);
   }
 
@@ -407,6 +580,7 @@ export async function mockRequest<T>(
       return fail<T>(1005, "consent_not_granted");
     }
     consentState = { ...consentState, revoked_at: consentState.revoked_at ?? now() };
+    saveMockConsent(consentState);
     return ok<T>(consentState);
   }
 
@@ -611,12 +785,63 @@ export async function mockRequest<T>(
     return ok<T>(next);
   }
 
+  /* 思想汇报同步（api@1.5 §7.15–7.17）：能力默认关闭，mock 不伪造转写/情绪结果。 */
+  if (
+    method === "POST" &&
+    /^\/api\/admin\/subjects\/[^/]+\/sensevoice-sync$/.test(path)
+  ) {
+    return fail<T>(5001, "sensevoice_sync_disabled");
+  }
+
+  if (
+    method === "GET" &&
+    /^\/api\/admin\/subjects\/[^/]+\/sensevoice-syncs$/.test(path)
+  ) {
+    return ok<T>({
+      items: [],
+      page: Number(textQuery(options, "page")) || 1,
+      page_size: Number(textQuery(options, "page_size")) || 20,
+      total: 0,
+    });
+  }
+
+  if (
+    method === "GET" &&
+    /^\/api\/admin\/sensevoice-syncs\/[^/]+$/.test(path)
+  ) {
+    return fail<T>(1004, "not_found");
+  }
+
+  if (
+    method === "GET" &&
+    /^\/api\/admin\/subjects\/[^/]+\/media$/.test(path)
+  ) {
+    const subjectId = decodeURIComponent(path.split("/")[4]);
+    const rawDays = subjects.media[subjectId] ?? [];
+    const availableDates = rawDays
+      .map((day) => day.date)
+      .sort((left, right) => right.localeCompare(left));
+    const requestedDate = textQuery(options, "date") || availableDates[0] || "";
+    const raw = rawDays.find((day) => day.date === requestedDate) ?? null;
+    return ok<T>({
+      subject_id: subjectId,
+      date: requestedDate,
+      available_dates: availableDates,
+      item: raw ? dailyMediaOf(raw) : null,
+    });
+  }
+
   if (method === "GET" && /^\/api\/admin\/subjects\/[^/]+$/.test(path)) {
     const subjectId = decodeURIComponent(path.split("/")[4]);
     const subject = subjects.items.find((item) => item.subject_id === subjectId);
-    return subject
-      ? ok<T>(subjectSummary(subject))
-      : fail<T>(1004, "not_found");
+    if (!subject) {
+      return fail<T>(1004, "not_found");
+    }
+    const detail: SubjectDetail = {
+      ...subjectSummary(subject),
+      ...profileOf(subjectId),
+    };
+    return ok<T>(detail);
   }
 
   if (path === "/api/admin/sessions" && method === "GET") {
@@ -705,9 +930,12 @@ export async function mockRequest<T>(
   }
 
   if (path === "/api/admin/dashboard" && method === "GET") {
-    const tasks = mockTasks(dashboard.subject_id);
+    const requestedId = textQuery(options, "subject_id") || dashboardFile.subject_id;
+    const base = dashboardFor(requestedId);
+    const tasks = mockTasks(requestedId);
     return ok<T>({
-      ...dashboard,
+      ...base,
+      subject_id: requestedId,
       overdue: { checkin: tasks.checkin.overdue, report: tasks.report.overdue },
     });
   }

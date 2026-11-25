@@ -142,7 +142,22 @@ export type SubjectListItem = {
   overdue: SubjectOverdue;
 };
 
-export type SubjectDetail = SubjectListItem;
+export type Gender = "male" | "female" | "unknown";
+
+/** 原型扩展档案字段：db@1.5 / api@1.5 尚未定义性别、年龄、身份证号等，联调前需补契约。 */
+export type SubjectProfileFields = {
+  gender: Gender | null;
+  age: number | null;
+  id_card: string | null;
+  phone: string | null;
+  address: string | null;
+  correction_type: string | null;
+  start_date: string | null;
+  end_date: string | null;
+};
+
+export type SubjectDetail = SubjectListItem & SubjectProfileFields;
+
 
 export type SubjectFrequencyPayload = {
   checkin_interval_days?: number;
@@ -262,6 +277,50 @@ export type ReviewDetail = {
   created_at: string;
 };
 
+/* ---------- 管理端 · 思想汇报同步（api@1.5 §7.15–7.17） ---------- */
+
+/** §7.15 / §7.16 列表项；列表不返回转写与情绪片段。 */
+export type SensevoiceSyncItem = {
+  sync_id: string;
+  subject_id: string;
+  session_id: string;
+  status: string;
+  provider: string;
+  emotion_primary: string | null;
+  emotion_confidence: number | null;
+  data_version: string;
+  operator: string;
+  created_at: string;
+};
+
+/** §7.16 分页结构 */
+export type SensevoiceSyncList = Paged<SensevoiceSyncItem>;
+
+/** db@1.5 §7.1 情绪片段 */
+export type SensevoiceEmotionTrigger = {
+  text: string;
+  label: string;
+  start_sec: number;
+  end_sec: number;
+};
+
+/** db@1.5 §7.1 emotion_json 解析结果 */
+export type SensevoiceEmotion = {
+  schema_version: string;
+  primary: string;
+  confidence: number;
+  scores: Record<string, number>;
+  triggers: SensevoiceEmotionTrigger[];
+};
+
+/** §7.17 同步详情：列表字段 + 转写全文 + 情绪报告（读取留痕）。 */
+export type SensevoiceSyncDetail = SensevoiceSyncItem & {
+  transcript_text: string;
+  transcript_language: string | null;
+  emotion: SensevoiceEmotion | null;
+  updated_at: string;
+};
+
 /** api@1.5 §7.11 与补记·二 */
 export type DashboardData = {
   subject_id: string;
@@ -271,3 +330,35 @@ export type DashboardData = {
   last_session_at: string | null;
   overdue: SubjectOverdue;
 };
+
+/* ---------- 管理端 · 按日期的打卡影像与思想汇报录音 ----------
+ * 原型扩展：api@1.5 明确不返回音频与原始影像，联调前需补契约与留痕规则。
+ */
+
+export type DailyCheckinMedia = {
+  checkin_id: string;
+  captured_at: string;
+  image_url: string | null;
+  capture_status: CaptureStatus | null;
+};
+
+export type DailyReportMedia = {
+  report_id: string;
+  submitted_at: string;
+  duration_sec: number | null;
+  audio_url: string | null;
+};
+
+export type DailyMedia = {
+  date: string;
+  checkin: DailyCheckinMedia | null;
+  report: DailyReportMedia | null;
+};
+
+export type SubjectMediaData = {
+  subject_id: string;
+  date: string;
+  available_dates: string[];
+  item: DailyMedia | null;
+};
+

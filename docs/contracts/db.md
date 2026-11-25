@@ -2,12 +2,14 @@
 
 | 项 | 值 |
 |---|---|
-| 契约版本 | `db@1.4` |
+| 契约版本 | `db@1.5` |
 | 所有者 | backend-engineer（`app/db/`） |
 | 引擎 | SQLite + SQLAlchemy 2.x（原型阶段手工迁移，正式部署前引入 Alembic） |
 | 关联 | [capture.md](./capture.md)、[api.md](./api.md)、[analysis.schema.json](./analysis.schema.json) |
 
 > v1.4 已冻结，后续仅接受实现驱动的变更。
+
+> **v1.5 实现补记（2026-11-25，附加、非破坏）**：新增 `sensevoice_syncs` 表，保存「思想汇报音频 → SenseVoice 转写 + 情绪分析」的同步结果（见 §7）；`audit_logs.action` 新增 `sensevoice.sync`、`target_type` 新增 `sensevoice_sync`。表结构、接口与前端面板先落地，真实调用由 `SENSEVOICE_SYNC_ENABLED` 开关控制，默认关闭。`sessions.transcript_path` / `analysis_json` 的存储约定不变，同步表不替代它们。
 
 > **v1.4 实现补记（2026-11-24，附加、非破坏）**：为「刷脸签到 / 录音思想汇报」双模块新增——`subjects.checkin_interval_days`（默认 1）、`subjects.report_interval_days`（默认 3）；`sessions.kind`（`checkin`/`report`，默认 `report`，存量数据即思想汇报等价语义）。签到/汇报逾期判定只读取，不改会话状态；逾期以 P0 复核工单表达（见 api.md 补记）。实现驱动追加：`review_tickets.review_id` 改为**可空**（逾期等无复盘关联的工单为 NULL，`UNIQUE(review_id)` 对 NULL 不冲突）；`review_tickets` 新增可空 JSON `detail_json`（逾期工单记录 `overdue_kind` / `overdue_days`）；`suggested_method` 新增 `talk_to_staff`；`audit_logs.action` 新增 `frequency.update`。逾期工单初始状态沿用 `pending`，不新增状态值。
 
@@ -239,7 +241,7 @@ pending ──confirm──> confirmed ──(自动)──> closed
 | `actor_type` | TEXT | NOT NULL, CHECK in (`subject`,`staff`,`system`) | |
 | `actor_id` | TEXT | NULL | 对象 id 或工号 |
 | `action` | TEXT | NOT NULL | 见 6.1 |
-| `target_type` | TEXT | NULL | `subject` / `session` / `review` / `ticket` |
+| `target_type` | TEXT | NULL | `subject` / `session` / `review` / `ticket` / `sensevoice_sync` |
 | `target_id` | TEXT | NULL | |
 | `detail_json` | TEXT | NULL, JSON | 不含音频、转写原文、面部图内容 |
 | `request_id` | TEXT | NULL | 请求追踪 id |
@@ -257,6 +259,7 @@ pending ──confirm──> confirmed ──(自动)──> closed
 | `subject.update` | 对象信息修改 |
 | `review.create` | 复盘创建 |
 | `frequency.update` | 管理端修改对象签到/汇报频率（2026-11-24 新增） |
+| `sensevoice.sync` | 管理端触发思想汇报同步（2026-11-25 新增） |
 
 `detail_json` 示例（`sensitive.view`）：
 
@@ -264,7 +267,55 @@ pending ──confirm──> confirmed ──(自动)──> closed
 { "field": "transcript", "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f" }
 ```
 
-## 7. 索引
+## 7. `sensevoice_syncs`（思想汇报同步记录，2026-11-25 新增）
+
+保存一次「思想汇报音频 → SenseVoice 转写 → 情绪分析」的同步结果。同步接口对同一会话可重复执行，生成新版本行，不覆盖历史。
+
+| 字段 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `id` | TEXT | PK | UUID v4 |
+| `subject_id` | TEXT | NOT NULL, FK → `subjects.id` | 关联矫正对象 |
+| `session_id` | TEXT | NOT NULL, FK → `sessions.id` | 来源汇报会话，必须 `kind='report'` 且 `status='captured'` |
+| `status` | TEXT | NOT NULL, DEFAULT `'succeeded'`, CHECK in (`succeeded`,`failed`) | 原子语义下失败整体回滚、不落 `failed` 行；`failed` 为后续异步重试预留 |
+| `provider` | TEXT | NOT NULL, DEFAULT `'sensevoice'` | 提供方标识 |
+| `transcript_text` | TEXT | NOT NULL | 转写全文；**敏感**，读取须写 `sensitive.view` 留痕 |
+| `transcript_language` | TEXT | NULL | 如 `zh` |
+| `emotion_json` | TEXT | NOT NULL, JSON | 情绪分析完整结果，结构见 7.1 |
+| `emotion_primary` | TEXT | NULL | 主情绪标签（冗余，便于列表展示） |
+| `emotion_confidence` | REAL | NULL, CHECK `0 <= x <= 1` | 主情绪置信度 |
+| `data_version` | TEXT | NOT NULL | 同步数据版本，格式 `sensevoice@{provider_version}+{yyyyMMddTHHmmss}` |
+| `operator` | TEXT | NOT NULL, DEFAULT `'staff'` | 操作人；原型无工号时回落 `staff` |
+| `error_code` | TEXT | NULL | 失败码，预留；不得写入敏感内容 |
+| `error_message` | TEXT | NULL | 失败说明，预留；不得写入转写原文 |
+| `created_at` | TEXT | NOT NULL | |
+| `updated_at` | TEXT | NOT NULL | |
+
+### 7.1 `emotion_json` 结构
+
+```json
+{
+  "schema_version": "emotion@1.0",
+  "primary": "焦虑",
+  "confidence": 0.87,
+  "scores": { "焦虑": 0.87, "平静": 0.13 },
+  "triggers": [
+    {
+      "text": "最近总是睡不好，心里很慌",
+      "label": "焦虑",
+      "start_sec": 3.2,
+      "end_sec": 5.1
+    }
+  ]
+}
+```
+
+- `primary` / `confidence` 必须与 `emotion_primary` / `emotion_confidence` 一致；
+- `triggers` 为关键情绪触发片段，至少 1 条；无可靠片段时允许空数组并置 `confidence < 0.5`；
+- 真实 SenseVoice 情绪接口协议未确认前，该结构由 Provider 适配层负责映射，**不得用 Mock 结果冒充真实同步**。
+
+**事务语义**：`POST .../sensevoice-sync` 在单个数据库事务中完成「选会话 → 调 ASR → 调情绪 → 写 `sensevoice_syncs` → 写 `audit_logs`」；任一步失败整体回滚，不留半成品记录，返回明确业务错误码。
+
+## 8. 索引
 
 | 表 | 索引 | 用途 |
 |---|---|---|
@@ -281,8 +332,10 @@ pending ──confirm──> confirmed ──(自动)──> closed
 | `review_tickets` | `UNIQUE(review_id)` | 一次复盘只开一张单，保证幂等 |
 | `audit_logs` | `(target_type, target_id, created_at DESC)` | 溯源 |
 | `audit_logs` | `(actor_id, created_at DESC)` | 人员操作审计 |
+| `sensevoice_syncs` | `(subject_id, created_at DESC)` | 对象同步记录列表 |
+| `sensevoice_syncs` | `(session_id)` | 按来源会话回溯 |
 
-## 8. `sessions` 样例行
+## 9. `sessions` 样例行
 
 ```json
 {
@@ -304,7 +357,7 @@ pending ──confirm──> confirmed ──(自动)──> closed
 }
 ```
 
-## 9. 迁移约定
+## 10. 迁移约定
 
 > 原型阶段手工迁移（`python -m app.db.init` 建表 + 手工迁移脚本），正式部署前引入 Alembic。
 
@@ -315,16 +368,16 @@ pending ──confirm──> confirmed ──(自动)──> closed
 5. SQLite 不支持 `ALTER COLUMN`，改列用"建新表 → 拷数据 → 换名"；
 6. 枚举新增值属于兼容变更，但必须同步更新本契约文档。
 
-## 10. 数据清理
+## 11. 数据清理
 
 | 规则 | 值 |
 |---|---|
 | 留存期 | `RETENTION_DAYS`，默认 180 |
-| 清理对象 | `sessions` 及其文件目录、`analysis_json` 中的转写引用 |
+| 清理对象 | `sessions` 及其文件目录、`analysis_json` 中的转写引用、`sensevoice_syncs` 的 `transcript_text` / `emotion_json`（保留版本、操作人与时间用于审计） |
 | 不清理 | `reviews`、`review_tickets`、`audit_logs`（保留审计价值，但脱敏） |
 | 触发 | 手动脚本 `python -m app.db.cleanup`（原型不做定时任务） |
 
-## 11. 禁止项
+## 12. 禁止项
 
 - 禁止在 `sessions` 中出现任何原始帧相关字段（如 `raw_frame_path`、`full_image`）；
 - 禁止在库中存音频 / 图片二进制；

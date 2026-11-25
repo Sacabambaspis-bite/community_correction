@@ -22,6 +22,12 @@ const MESSAGE_TEXT: Record<string, string> = {
   analysis_pipeline_not_ready: "分析功能尚未就绪",
   analysis_failed: "分析未完成，结果暂不可用",
   session_not_captured: "本次采集尚未完成",
+  sensevoice_sync_disabled: "同步能力未启用，请联系管理员",
+  sensevoice_unavailable: "同步服务暂不可用，请稍后重试",
+  no_report_audio: "该对象暂无可用思想汇报录音，请先完成一次思想汇报",
+  transcription_failed: "转写失败，本次同步未保存",
+  emotion_failed: "情绪分析失败，本次同步未保存",
+  sync_write_failed: "同步结果保存失败，请重试",
 };
 
 export function errorText(code: number, message?: string | null): string {

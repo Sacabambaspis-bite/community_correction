@@ -8,7 +8,14 @@ from __future__ import annotations
 
 from app.db.constants import AUDIT_ACTIONS, SUGGESTED_METHODS
 from app.db.database import Base, SessionLocal, engine
-from app.db.models import AuditLog, CaptureSession, Review, ReviewTicket, Subject
+from app.db.models import (
+    AuditLog,
+    CaptureSession,
+    Review,
+    ReviewTicket,
+    SensevoiceSync,
+    Subject,
+)
 
 __all__ = [
     "AUDIT_ACTIONS",
@@ -18,6 +25,7 @@ __all__ = [
     "Review",
     "ReviewTicket",
     "SUGGESTED_METHODS",
+    "SensevoiceSync",
     "SessionLocal",
     "Subject",
     "engine",
