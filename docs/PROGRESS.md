@@ -102,6 +102,50 @@
 | 后续待办 | ① 补充文本映射的单测与页面快照测试（当前依赖 typecheck/build + 浏览器人工验证）<br>② 档案、媒体、单对象看板的契约缺口仍待补（见 §5）<br>③ 身份证号等敏感字段的脱敏与查看范围需在契约中明确 |
 | 备注 | 规则编号等原始标识仍由接口与审计留痕保存，仅界面不再展示；P0/P1/P2、S001 编号与会话 UUID 属机器标识，保留显示 |
 
+### 2.6 进度记录：P16 对象心理状态分析看板（任意区间 + 四图 + 中性语义）
+
+| 项 | 内容 |
+|---|---|
+| 完成时间 | 2026-11-25（Asia/Shanghai） |
+| 变更内容 | ① **契约**：`api.md` 新增 §7.18 `GET /api/admin/subjects/{subject_id}/trends`（任意日期区间、缺省近 14 天、上限 366 天、逐日补齐、字段唯一口径、`signals` 九码枚举），并在 §5.4/§6/§8/变更记录同步；`ui.md` 新增补记 11、§4.2 看板区块、§4.2.1 心理提示文案映射、§8.2 八个新组件、§9 五条验收项<br>② **后端**：新增 `app/api/aggregation.py`（区间校验 + 日粒度聚合 + 9 个信号纯函数，阈值常量标「待标定」）、`schemas.py` 11 个输出模型、`admin.py` 只读路由；单条 `analysis_json` 解析失败跳过并只记 `session_id`<br>③ **种子**：`scripts/seed_demo.py` 为 S001 生成连续 14 天波动窗口（每日 1 签到 + 1 汇报、每日复盘、颜色 `green,green,blue,yellow,yellow,orange,blue,green,blue,yellow,orange,orange,yellow,blue`），含 2 天高唤醒负效价、3 天低效价低唤醒、2 天正向、2 天 `low`（1 天 `conflict`）、2 天 `degraded`，并缺 2 天签到、1 天汇报制造逾期；按 `(subject_id, window_end)` 预检查保证幂等<br>④ **前端**：`SubjectDetail` 新增 `TrendBoard/`（区间条、汇总条、提示卡、四图），`types/admin/mock` 对接 §7.18，新增 `psychText.ts` 与 `mock/trend.json`；引入 `recharts@3.11.1`；`TrendStrip` 保留兼容 |
+| 完成状态 | 已完成（契约 + 后端 + 种子 + 前端）。`python -m pytest tests -q` → **301 passed**（新增 15 个趋势契约用例）；`npm run typecheck`、`npm run build` 通过；mock 模式浏览器实测 S001 详情页：看板标题 + 散点图/热力图/柱状图/依从性日历四图全部渲染，无红色报错、无整块空白 |
+| 影响范围 | `docs/contracts/{api,ui}.md`；`app/api/{aggregation.py,schemas.py,routers/admin.py}`；`scripts/seed_demo.py`；`tests/test_api/test_trends.py`；`web/package.json`、`web/package-lock.json`、`web/src/api/{types,admin,mock}.ts`、`web/src/mock/trend.json`、`web/src/lib/psychText.ts`、`web/src/admin/SubjectDetail/{SubjectDetailPage.tsx,TrendBoard/*}`。未改 `app/db/`、`app/capture/`、`app/analysis/`、`app/grading/`，不新增表/列、不做迁移 |
+| 后续待办 | ① 真实 `storage/app.db` 尚未执行扩充后的 seed（避免覆盖既有真实会话，需确认后再跑）<br>② 历史 `reviews.window_end` 存在完整 ISO 时间戳写法，与契约「`YYYY-MM-DD` 自然日」漂移；端点已兼容，历史数据未清洗<br>③ mock 未放置「无复盘日」样例（14 天均有复盘），灰色块分支仅由代码路径覆盖<br>④ 已补齐（P17）：看板证据入口直达 `/admin/reviews/:reviewId` 单条复盘只读详情<br>⑤ 象限分界与 9 个信号阈值均为「待标定」 |
+| 备注 | 文案红线：后端只回 `signals` 机器码，前端 `psychText.ts` 只使用测量学描述并统一附「仅作提示，需结合面谈与人工复核」，全仓库扫描无「抑郁/焦虑症/人格障碍/精神异常/自杀」；行为依从性日历使用独立三态配色，不复用五色风险令牌；`behavior.overdue` 为历史回溯口径，与列表页实时逾期可能不同 |
+
+### 2.7 进度记录：P17 看板证据入口直达单条复盘
+
+| 项 | 内容 |
+|---|---|
+| 完成时间 | 2026-11-25（Asia/Shanghai） |
+| 变更内容 | ① `ui.md` 新增 §4.6 复盘详情 `/admin/reviews/:reviewId`（只读区块、证据入口约定、禁止项），§8.2 组件清单与 §9 验收项同步<br>② 新增 `web/src/admin/Reviews/ReviewDetailPage.tsx` + `ReviewDetail.module.css`：基本信息（对象可点回详情、窗口、生成时间、规则版本）、结论区（`ColorBadge` + `rules_fired` 中文 + 趋势色/单次风险/一致性/人工复核）、证据链（复用 `EvidenceTable`）；只读，无流转动作<br>③ `App.tsx` 在 `/admin` 下新增 `reviews/:reviewId` 路由<br>④ `trendDisplay.ts` 的 `evidenceHref` 改为接收 `review_id`，散点 tooltip/详情面板与热力块全部直达复盘详情；缺 `review_id` 仅显示中性说明，不伪造链接 |
+| 完成状态 | 已完成。`npm run typecheck`、`npm run build` 通过；浏览器实测：点击热力图橙色方格（2026-11-22）→「查看依据」→ `/admin/reviews/c41d0a77-…b0b`，页面显示「复盘详情」与 1 行证据链，无红色报错；直接打开复盘 URL 亦正常渲染 |
+| 影响范围 | `docs/contracts/ui.md`；`web/src/App.tsx`、`web/src/admin/Reviews/*`、`web/src/admin/SubjectDetail/TrendBoard/{trendDisplay.ts,RussellScatter.tsx,ColorCalendarHeatmap.tsx}`。未改后端、`app/`、`tests/`、`web/src/api/*`、`web/src/mock/*` |
+| 后续待办 | mock 对任意 `review_id` 返回同一复盘，`1004` 分支仅能在真实后端复现；真实库联调时需确认复盘 `review_id` 与看板数据一致 |
+| 备注 | 复盘详情为只读记录，不展示转写、音频、影像；查看原始内容仍走复核任务详情的折叠敏感面板（留痕） |
+
+### 2.8 进度记录：P18 心理趋势并入状态概览 + 四图折叠
+
+| 项 | 内容 |
+|---|---|
+| 完成时间 | 2026-11-25（Asia/Shanghai） |
+| 变更内容 | ① `ui.md` 新增补记 12：移除独立看板区块/标题，全部内容并入「状态概览」；四图改为可折叠按钮（默认收起、`aria-expanded`、展开时挂载）；§4.2、§8.2、§9 同步<br>② `SubjectDetailPage.tsx` 删除「当前结果」后的独立 `<TrendBoard />`，改为在「状态概览」section 内、dashboard 条件块之后渲染，dashboard 失败时趋势区仍可用；顶部描述改为「心理状态趋势（并入状态概览）」<br>③ `TrendBoard.tsx` 根节点改为无标题的 `div.trendBlock`（仅上分隔线），新增 `openCharts` 受控状态（四键默认 false，切换区间不重置）；`ChartCard` 替换为 `ChartCollapsible`<br>④ 新建 `ChartCollapsible.tsx`：按钮+chevron、`aria-controls`、面板仅展开挂载、180ms 入场动画、`prefers-reduced-motion` 降级；加载骨架改为「汇总骨架 + 4 个按钮同高占位条」 |
+| 完成状态 | 已完成。`npm run typecheck`、`npm run build` 通过；浏览器实测：页面无「心理状态分析看板」文本，四个按钮位于「状态概览」内且默认全部收起；点击 Russell 展开出完整散点图（坐标轴/象限/彩色点），再次点击收起；展开状态切换「近 7 天」并查询后仍保持展开；无横向滚动、无红色报错 |
+| 影响范围 | `docs/contracts/ui.md`；`web/src/admin/SubjectDetail/SubjectDetailPage.tsx`、`TrendBoard/{TrendBoard.tsx,TrendBoard.module.css,ChartCollapsible.tsx}`。未改四个图表组件、`TrendStrip`、`app/`、`api/`、`mock/`、`tests/` |
+| 后续待办 | 折叠状态仅存在内存，刷新页面后回到全收起；如需记住用户偏好再评估是否落 `localStorage`（当前契约禁止写入） |
+| 备注 | 日期区间条、汇总与心理提示卡常驻不折叠；四图的数据、证据深链、空态、配色与免责声明均未改变 |
+
+### 2.9 进度记录：P19 五色热力图改为横向折行布局
+
+| 项 | 内容 |
+|---|---|
+| 完成时间 | 2026-11-25（Asia/Shanghai） |
+| 变更内容 | ① `ui.md` 新增补记 13 与 §9 验收项：热力图由「周为列 / 星期为行」改为按日期升序从左到右、容器不足自动折行，移除横向滚动<br>② `ColorCalendarHeatmap.tsx` 删除 `calendarWeeks` / `WEEKDAY_LABELS` 与周列矩阵，改为遍历升序 `orderedDays`；每格为 `div.calendarDayCell`（色块按钮 + `MM-DD` 标签），按钮的 `aria-label` / `aria-pressed` / `title` / 点击与聚焦逻辑原样保留<br>③ `TrendBoard.module.css` 新增 `.calendarDayList`（flex + wrap + gap 6px）、`.calendarDayCell`（40px，≤480px 时 34px / gap 4px）、`.calendarDateLabel`，删除 `.calendarScroll` / `.calendarGrid` / `.calendarRowGroup` / `.weekdayLabel` / `.calendarBlank`<br>④ 组标签与图注同步为横向排列与折行说明 |
+| 完成状态 | 已完成。`npm run typecheck`、`npm run build` 通过；浏览器实测（553px 视口）：14 格按日期升序排列，首格 11-12、末格 11-25，折行为 8+6 两行；点击 11-14 显示「蓝色」、11-17 显示「橙色」；无横向滚动、无红色报错 |
+| 影响范围 | `docs/contracts/ui.md`；`web/src/admin/SubjectDetail/TrendBoard/{ColorCalendarHeatmap.tsx,TrendBoard.module.css}`。未改 `dateUtils.ts`、`TrendBoard.tsx`、其他图表、`api/`、`mock/`、`app/`、`tests/` |
+| 后续待办 | 常见桌面宽度可单行完整展示；窄屏按 2–3 行折行。若后续区间扩大到 30/90 天，可评估按月分组或固定高度滚动，避免行数过多 |
+| 备注 | 五色映射、无复盘中性灰、选中描边、键盘聚焦、详情面板、证据深链（`/admin/reviews/:reviewId`）与图例均未改变 |
+
 ## 3. 已完成功能模块与交付物
 
 | 对象 | 状态 | 标签 / 提交 |
@@ -140,6 +184,14 @@
 | 管理端对象列表姓名跳转详情 + 基础档案字段（性别/年龄/身份证号/住址等） | 已实现（P14，Mock） | 本次提交 |
 | 对象详情按日期筛选打卡影像与思想汇报录音（在线预览/播放，敏感面板默认折叠） | 已实现（P14，Mock 媒体） | 本次提交 |
 | 状态看板内容合并进对象详情、删除独立看板页面与导航；旧地址重定向对象列表 | 已实现（P14） | 本次提交 |
+| 心理状态趋势聚合 API `GET /api/admin/subjects/{id}/trends`（任意区间、逐日补齐、多维指标、9 个信号码、无新增表） | 已实现（P16） | 本次提交 |
+| 管理端对象详情「心理状态分析看板」：区间条 + Russell 散点 + 五色热力图 + 稳定性柱状 + 依从性日历（Recharts） | 已实现（P16，mock 联调） | 本次提交 |
+| `scripts/seed_demo.py` S001 连续 14 天波动种子（含降级/低一致性/冲突/逾期） | 已实现（P16） | 本次提交 |
+| 复盘详情页 `/admin/reviews/:reviewId`（只读：结论、规则中文、证据链） | 已实现（P17） | 本次提交 |
+| 看板散点/热力块证据入口按 `review_id` 直达单条复盘；缺 `review_id` 仅中性说明 | 已实现（P17） | 本次提交 |
+| 心理状态趋势并入「状态概览」，移除独立看板入口/容器 | 已实现（P18） | 本次提交 |
+| 四个图表封装为可折叠按钮，默认收起、独立展开/收起（`ChartCollapsible`） | 已实现（P18） | 本次提交 |
+| 五色热力图改为按日期从左到右、窄屏自动折行（移除周列矩阵与横向滚动） | 已实现（P19） | 本次提交 |
 | 远程仓库 | `main` 与 `origin/main` 同步 | `origin/main` @ `4c38d5d` |
 | `scripts/seed_demo.py` 演示数据（含占位素材） | 已实现 | `0bb78b5` |
 | QA 核验 + M1–M4/L4/L8 修复 | 已完成 | `638245e`（报告）、`7732930`（修复） |
@@ -276,7 +328,8 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 
 **演示数据说明**
 
-- `scripts/seed_demo.py` 生成 6 subjects / 42 sessions / 6 reviews / 3 tickets / 4 audit_logs，颜色（2 绿、1 蓝、1 黄、1 橙、1 红）与复核任务均为**手工指定**，未调用 `app/grading/`，脚本内无阈值判断；
+- `scripts/seed_demo.py` 生成 **6 subjects / 59 sessions / 20 reviews / 3 tickets / 4 audit_logs**，颜色合计（5 绿、5 蓝、5 黄、4 橙、1 红）与复核任务均为**手工指定**，未调用 `app/grading/`，脚本内无阈值判断；
+- P16 起 **S001（张三）为连续 14 天波动窗口**：每日 1 签到 + 1 汇报（缺 2 天签到、1 天汇报制造逾期）、每日 1 条复盘（`green,green,blue,yellow,yellow,orange,blue,green,blue,yellow,orange,orange,yellow,blue`），并含 2 天 `degraded`、2 天 `low`（1 天 `conflict`）；其余 5 个对象维持原有单条复盘形态；
 - `face.jpg` 为 300×300 灰底 + 几何剪影 + `placeholder` 的占位素材，`transcript.txt` 为一行占位文本；二者非真实采集，不得用于效果评估或对外宣称；
 - 既有个别真实采集产物（`storage/subjects/3b1e7c90-...`）保留，seed 不覆盖已存在文件。
 
@@ -303,10 +356,13 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 19. **P14 档案字段无后端与脱敏定义**：性别/年龄/身份证号/住址等仅存在于前端 mock（`subject.json.profiles`），`db` / `api` 契约未定义字段与可见范围；身份证号当前明文展示，接入真实接口前必须补脱敏与权限规则。
 20. **P14 媒体为演示素材**：打卡影像由文生图占位服务生成、录音为运行时构造的 2 秒静音 WAV；`GET /api/admin/subjects/{id}/media` 仅 mock 实现，鉴权、留存期与 `audit_logs` 留痕未定义；敏感面板展开只显示提示文案，未产生真实调阅记录。
 21. **P14 单对象看板为 mock 变体**：详情页以 `GET /api/admin/dashboard?subject_id=` 取对象级数据，后端仅支持缺省取最近采集对象；`variants` 为前端模拟，需在契约中明确单对象语义后再联调。
+22. **P16 真实库尚未执行新 seed**：扩充后的 `seed_demo.py` 已在临时库验证（59 sessions / 20 reviews），但 `storage/app.db` 未重跑，以免覆盖既有真实会话；真实模式看板目前只能呈现既有数据，需要时按「先备份、再执行、用 `(subject_id, window_end)` 幂等跳过」流程处理。
+23. **P16 历史 `window_end` 格式漂移**：早期 `reviews.window_end` 存在完整 ISO 时间戳，契约要求 `YYYY-MM-DD`；趋势端点已兼容（按本地日期部分匹配），但历史数据未清洗，唯一约束在该类数据上可能出现同日多条。
+24. **P16 看板为 mock 联调 + 阈值待标定**：四图在 mock 模式验证通过，真实后端联调需 `VITE_USE_MOCK=0` 且先跑 seed；`signals` 9 个阈值与四象限分界均为契约常量标注「待标定」，正式上线前需业务确认。
 
 ## 6. 下一步顺序（建议）
 
-1. **fe-user / fe-admin**：把 `web/src/api/*` 从 mock 切到真实端点；管理端接 `tickets` / `dashboard` / `subjects` 详情与媒体（用户端 consent 门禁与一次性授权已完成）。
+1. **fe-user / fe-admin**：把 `web/src/api/*` 从 mock 切到真实端点；管理端接 `tickets` / `dashboard` / `subjects` 详情与媒体（用户端 consent 门禁与一次性授权已完成）；P16 趋势看板改用 `GET /api/admin/subjects/{id}/trends` 真实接口。
 2. **契约补齐（P14 前置）**：在 `db.md` / `api.md` / `ui.md` 定义对象档案字段与身份证号脱敏、`GET /api/admin/subjects/{id}/media` 的鉴权/留存/audit 留痕、单对象 dashboard 语义。
 3. **backend-engineer（余项）**：60 秒频控 `1006`、`capture_busy` 专用码、`GET /api/admin/reviews` 列表、转写查看、档案字段与媒体端点。
 4. **qa-guard + privacy-check**：每轮合并前跑 qa-guard；`c46536e` 新增的 analyze/reviews/tickets 端点涉及心理与复核任务数据，合并前过 privacy-check。P13 新增同步详情会读取转写原文、P14 档案与影像/录音涉敏感个人信息，合并前同样需过 privacy-check。
