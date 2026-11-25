@@ -93,7 +93,9 @@ export function SubjectTable({
             );
             return (
               <tr key={item.subject_id} className={styles.row}>
-                <td className={`${styles.td} ${styles.code}`}>{item.code}</td>
+                <td className={`${styles.td} ${styles.code} ${styles.nowrap}`}>
+                  {item.code}
+                </td>
                 <td className={styles.td}>
                   <div className={styles.nameCell}>
                     <Link
@@ -108,7 +110,9 @@ export function SubjectTable({
                     />
                   </div>
                 </td>
-                <td className={styles.td}>{STATUS_TEXT[item.status] ?? item.status}</td>
+                <td className={`${styles.td} ${styles.nowrap}`}>
+                  {STATUS_TEXT[item.status] ?? "未知状态"}
+                </td>
                 <td className={styles.td}>
                   {item.latest_color ? (
                     <ColorBadge
@@ -121,7 +125,7 @@ export function SubjectTable({
                     <span className={styles.muted}>暂无结果</span>
                   )}
                 </td>
-                <td className={styles.td}>
+                <td className={`${styles.td} ${styles.nowrap}`}>
                   {item.pending_tickets > 0 ? (
                     <Link
                       className={styles.pendingLink}
@@ -133,17 +137,17 @@ export function SubjectTable({
                     <span className={styles.muted}>0</span>
                   )}
                 </td>
-                <td className={styles.td}>
+                <td className={`${styles.td} ${styles.nowrap}`}>
                   {recentUnavailable
                     ? "暂不可用"
                     : formatTime(lastCheckinAt) || "尚未完成"}
                 </td>
-                <td className={styles.td}>
+                <td className={`${styles.td} ${styles.nowrap}`}>
                   {recentUnavailable
                     ? "暂不可用"
                     : formatTime(lastReportAt) || "尚未完成"}
                 </td>
-                <td className={styles.td}>{latestAt || "—"}</td>
+                <td className={`${styles.td} ${styles.nowrap}`}>{latestAt || "—"}</td>
               </tr>
             );
           })}

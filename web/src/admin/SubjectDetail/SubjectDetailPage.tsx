@@ -58,10 +58,10 @@ const CAPTURE_STATUS_TEXT: Record<CaptureStatus, string> = {
   error: "采集异常",
 };
 
-const AUDIT_HINT = "原型：展开动作待接入 audit 留痕接口";
-const MEDIA_AUDIT_HINT = "原型：调阅记录待接入 audit 留痕接口";
+const AUDIT_HINT = "原型：展开动作待接入审计留痕接口";
+const MEDIA_AUDIT_HINT = "原型：调阅记录待接入审计留痕接口";
 const MEDIA_NOTICE =
-  "影像与音频为 mock 演示数据（录音为合成提示音），接入真实接口前不得用于实际处置。";
+  "影像与音频为模拟演示数据（录音为合成提示音），接入真实接口前不得用于实际处置。";
 
 function sortByCapturedAtDesc(items: AdminSessionItem[]): AdminSessionItem[] {
   return [...items].sort((left, right) => {
@@ -426,7 +426,7 @@ export default function SubjectDetailPage() {
             <div className={styles.infoItem}>
               <span className={styles.infoLabel}>状态</span>
               <span className={styles.infoValue}>
-                {subject.status ? STATUS_TEXT[subject.status] ?? subject.status : "未登记"}
+                {subject.status ? STATUS_TEXT[subject.status] ?? "未知状态" : "未登记"}
               </span>
             </div>
             <div className={styles.infoItem}>
@@ -755,7 +755,7 @@ export default function SubjectDetailPage() {
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>当前结果</h2>
         <p className={styles.notice}>
-          复盘结果接口未实现（api@1.5 §5.4），暂不展示色码与证据链，避免展示无来源的结论。
+          复盘结果接口未实现（接口契约 5.4 节），暂不展示色码与证据链，避免展示无来源的结论。
         </p>
       </section>
 
@@ -773,7 +773,7 @@ export default function SubjectDetailPage() {
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>记录检索</h2>
         <p className={styles.notice}>
-          契约尚未提供时间范围与色码过滤参数（api@1.5 §7.7 仅支持 subject_id / status /
+          契约尚未提供时间范围与色码过滤参数（接口契约 7.7 节仅支持对象编号 / 状态 /
           分页），以下控件为占位，暂不可用。
         </p>
         <fieldset className={styles.filterBox} disabled>
@@ -805,7 +805,7 @@ export default function SubjectDetailPage() {
       <section className={styles.section}>
         <h2 className={styles.sectionTitle}>敏感内容</h2>
         <p className={styles.notice}>
-          默认折叠；展开需留痕，本轮仅提示占位文案，接入后调用 audit 留痕接口。
+          默认折叠；展开需留痕，本轮仅提示占位文案，接入后调用审计留痕接口。
         </p>
         <div className={styles.sensitiveStack}>
           <SensitivePanel title="面部图" onExpand={() => setAuditHint(AUDIT_HINT)} />

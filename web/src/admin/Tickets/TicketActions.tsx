@@ -1,4 +1,4 @@
-/* 工单三种流转动作（ui@1.2 §4.5）：确认 note 选填；修正五色 + note 必填；关闭 note 必填。
+/* 复核任务三种流转动作（ui@1.2 §4.5）：确认 note 选填；修正五色 + note 必填；关闭 note 必填。
  * 每次提交调用 transitionTicket，成功后展示返回状态并触发详情刷新。
  */
 import { useState, type FormEvent } from "react";
@@ -55,7 +55,7 @@ export function TicketActions({ ticketId, status, onDone }: TicketActionsProps) 
 
   let validationHint: string | null = null;
   if (closed) {
-    validationHint = "工单已结束，不再接受新的流转。";
+    validationHint = "任务已结束，不再接受新的流转。";
   } else if (action === "correct") {
     if (!conclusionColor && !trimmedNote) {
       validationHint = "修正需选择最终色码并填写说明。";
@@ -212,7 +212,7 @@ export function TicketActions({ ticketId, status, onDone }: TicketActionsProps) 
         <div className={styles.resultBox} role="status">
           <span>
             动作：{ACTION_TEXT[result.action]}　状态：
-            {STATUS_TEXT[result.status] ?? result.status}
+            {STATUS_TEXT[result.status] ?? "未知状态"}
           </span>
           <span>
             结论色码：

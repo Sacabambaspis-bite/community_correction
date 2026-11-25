@@ -44,7 +44,7 @@ function statusText(map: Record<string, string>, value: string | null): string {
   if (!value) {
     return "—";
   }
-  return map[value] ?? value;
+  return map[value] ?? "未知";
 }
 
 export function SessionTimeline({ items }: { items: AdminSessionItem[] }) {

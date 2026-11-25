@@ -19,6 +19,7 @@ import {
 } from "../../components/common/StateViews";
 import { errorText } from "../../lib/errorMessages";
 import { ApiError } from "../../lib/http";
+import { emotionText } from "../../lib/ruleText";
 import styles from "./SensevoiceSyncPanel.module.css";
 
 const SYNC_DISABLED_MESSAGE = "sensevoice_sync_disabled";
@@ -68,13 +69,13 @@ function DetailBody({ detail }: { detail: SensevoiceSyncDetail }) {
         {emotion ? (
           <>
             <p className={styles.detailLine}>
-              情绪类型：{emotion.primary}　置信度：{percent(emotion.confidence)}
+              情绪类型：{emotionText(emotion.primary)}　置信度：{percent(emotion.confidence)}
             </p>
             {scoreEntries.length > 0 ? (
               <ul className={styles.scores}>
                 {scoreEntries.map(([label, value]) => (
                   <li key={label} className={styles.scoreItem}>
-                    <span>{label}</span>
+                    <span>{emotionText(label)}</span>
                     <span className={styles.mono}>{percent(value)}</span>
                   </li>
                 ))}
@@ -94,7 +95,7 @@ function DetailBody({ detail }: { detail: SensevoiceSyncDetail }) {
               <li key={`${trigger.start_sec}-${trigger.end_sec}-${index}`} className={styles.triggerItem}>
                 <p className={styles.triggerText}>{trigger.text}</p>
                 <span className={styles.triggerMeta}>
-                  标签：{trigger.label} · {seconds(trigger.start_sec)} –{" "}
+                  标签：{emotionText(trigger.label)} · {seconds(trigger.start_sec)} –{" "}
                   {seconds(trigger.end_sec)} 秒
                 </span>
               </li>
@@ -300,7 +301,7 @@ export function SensevoiceSyncPanel({ subjectId }: { subjectId: string }) {
         </button>
       </div>
       <p className={styles.description}>
-        调用 SenseVoice 对最近一次思想汇报录音做转写与情绪分析。
+        调用语音分析服务对最近一次思想汇报录音做转写与情绪分析。
       </p>
 
       {notice ? (
@@ -354,7 +355,9 @@ export function SensevoiceSyncPanel({ subjectId }: { subjectId: string }) {
                 <dl className={styles.meta}>
                   <div className={styles.metaItem}>
                     <dt className={styles.metaLabel}>情绪类型</dt>
-                    <dd className={styles.metaValue}>{item.emotion_primary ?? "—"}</dd>
+                    <dd className={styles.metaValue}>
+                      {emotionText(item.emotion_primary ?? "")}
+                    </dd>
                   </div>
                   <div className={styles.metaItem}>
                     <dt className={styles.metaLabel}>置信度</dt>

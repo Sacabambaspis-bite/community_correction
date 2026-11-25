@@ -14,6 +14,7 @@ import {
 } from "../../components/common/StateViews";
 import { errorText } from "../../lib/errorMessages";
 import { ApiError } from "../../lib/http";
+import { ruleListText } from "../../lib/ruleText";
 import { isOverdueTicket, ticketSourceText } from "./ticketDisplay";
 import styles from "./Tickets.module.css";
 
@@ -120,7 +121,7 @@ export default function TicketsPage() {
     <section>
       <PageTitle
         title="复核队列"
-        description="按优先级查看待复核工单，色码与触发规则、证据入口同屏展示。"
+        description="按优先级查看待复核任务，色码与触发规则、证据入口同屏展示。"
       />
 
       <form
@@ -162,7 +163,7 @@ export default function TicketsPage() {
             className={styles.input}
             type="text"
             value={subjectInput}
-            placeholder="subject_id"
+            placeholder="请输入对象编号"
             onChange={(event) => setSubjectInput(event.target.value)}
           />
         </label>
@@ -194,7 +195,7 @@ export default function TicketsPage() {
       ) : null}
 
       {!loading && !error && items.length === 0 ? (
-        <EmptyState text="当前筛选条件下没有工单。" />
+        <EmptyState text="当前筛选条件下没有复核任务。" />
       ) : null}
 
       {!loading && !error && items.length > 0 ? (
@@ -204,10 +205,10 @@ export default function TicketsPage() {
               <tr>
                 <th className={styles.th}>优先级</th>
                 <th className={styles.th}>对象</th>
-                <th className={styles.th}>工单来源</th>
+                <th className={styles.th}>任务来源</th>
                 <th className={styles.th}>当前色码</th>
                 <th className={styles.th}>触发规则</th>
-                <th className={styles.th}>建单时间</th>
+                <th className={styles.th}>生成时间</th>
                 <th className={styles.th}>截止</th>
                 <th className={styles.th}>状态</th>
               </tr>
@@ -220,7 +221,7 @@ export default function TicketsPage() {
                     key={item.ticket_id}
                     className={styles.row}
                     tabIndex={0}
-                    title="点击查看工单详情"
+                    title="点击查看任务详情"
                     onClick={() => navigate(`/admin/tickets/${item.ticket_id}`)}
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
@@ -228,16 +229,13 @@ export default function TicketsPage() {
                       }
                     }}
                   >
-                    <td className={styles.td}>{item.priority}</td>
-                    <td className={styles.td}>
-                      <span className={styles.subjectCell}>
-                        <span className={styles.subjectName}>
-                          {item.subject_name ?? "未命名对象"}
-                        </span>
-                        <span className={styles.subjectId}>{item.subject_id}</span>
+                    <td className={`${styles.td} ${styles.nowrap}`}>{item.priority}</td>
+                    <td className={`${styles.td} ${styles.nowrap}`}>
+                      <span className={styles.subjectName}>
+                        {item.subject_name ?? "未命名对象"}
                       </span>
                     </td>
-                    <td className={styles.td}>
+                    <td className={`${styles.td} ${styles.nowrap}`}>
                       <span
                         className={isOverdueTicket(item) ? styles.overdueSource : undefined}
                       >
@@ -253,23 +251,27 @@ export default function TicketsPage() {
                         />
                       ) : (
                         <span className={styles.muted}>
-                          {isOverdueTicket(item) ? "逾期工单，无分析色码" : "暂无分析色码"}
+                          {isOverdueTicket(item) ? "逾期任务，无分析色码" : "暂无分析色码"}
                         </span>
                       )}
                     </td>
                     <td className={styles.td}>
                       {item.triggered_rules.length > 0
-                        ? item.triggered_rules.join("、")
+                        ? ruleListText(item.triggered_rules)
                         : "—"}
                     </td>
-                    <td className={styles.td}>{formatTime(item.opened_at)}</td>
-                    <td className={`${styles.td} ${overdue ? styles.overdue : ""}`}>
+                    <td className={`${styles.td} ${styles.nowrap}`}>
+                      {formatTime(item.opened_at)}
+                    </td>
+                    <td
+                      className={`${styles.td} ${styles.nowrap} ${overdue ? styles.overdue : ""}`}
+                    >
                       {formatTime(item.due_at)}
                       {overdue ? <span className={styles.overdueTag}>已超期</span> : null}
                     </td>
-                    <td className={styles.td}>
+                    <td className={`${styles.td} ${styles.nowrap}`}>
                       <span className={styles.statusTag}>
-                        {STATUS_TEXT[item.status] ?? item.status}
+                        {STATUS_TEXT[item.status] ?? "未知状态"}
                       </span>
                     </td>
                   </tr>

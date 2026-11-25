@@ -1,4 +1,4 @@
-/* 工单详情（ui@1.2 §4.5）：结论区色码与证据链同屏，三种流转动作由 TicketActions 承担。
+/* 复核任务详情（ui@1.2 §4.5）：结论区色码与证据链同屏，三种流转动作由 TicketActions 承担。
  * 不提供一键处置、批量改对象状态或批量关闭入口。
  */
 import { useCallback, useEffect, useState } from "react";
@@ -31,13 +31,23 @@ const STATUS_TEXT: Record<string, string> = {
 };
 
 const ACTION_TEXT: Record<string, string> = {
-  opened: "自动建单",
+  opened: "自动生成",
   confirm: "确认",
   correct: "修正",
   close: "关闭",
 };
 
-const AUDIT_HINT = "原型：展开动作待接入 audit 留痕接口";
+const ACTOR_TEXT: Record<string, string> = {
+  system: "系统",
+  staff: "工作人员",
+  admin: "管理员",
+};
+
+const AUDIT_HINT = "原型：展开动作待接入审计留痕接口";
+
+function actorText(actor: string): string {
+  return ACTOR_TEXT[actor] ?? actor;
+}
 
 function formatTime(value: string | null): string {
   if (!value) {
@@ -68,7 +78,7 @@ export default function TicketDetailPage() {
   const loadTicket = useCallback(async () => {
     if (!ticketId) {
       setTicket(null);
-      setError("缺少工单编号，无法查看详情。");
+      setError("缺少任务编号，无法查看详情。");
       setLoading(false);
       return;
     }
@@ -101,12 +111,12 @@ export default function TicketDetailPage() {
   return (
     <section>
       <PageTitle
-        title="工单详情"
+        title="复核任务详情"
         description="查看结论、证据链与留痕，并按确认 / 修正 / 关闭逐单处理。"
         extra={<Link to="/admin/tickets">返回复核队列</Link>}
       />
 
-      {loading ? <LoadingState text="正在加载工单详情…" /> : null}
+      {loading ? <LoadingState text="正在加载任务详情…" /> : null}
 
       {!loading && error ? (
         <>
@@ -125,11 +135,11 @@ export default function TicketDetailPage() {
               <div className={styles.infoItem}>
                 <span className={styles.infoLabel}>对象</span>
                 <span className={styles.infoValue}>
-                  {ticket.subject_name ?? "未命名对象"}（{ticket.subject_id}）
+                  {ticket.subject_name ?? "未命名对象"}
                 </span>
               </div>
               <div className={styles.infoItem}>
-                <span className={styles.infoLabel}>工单来源</span>
+                <span className={styles.infoLabel}>任务来源</span>
                 <span
                   className={`${styles.infoValue} ${
                     isOverdueTicket(ticket) ? styles.overdueSource : ""
@@ -143,7 +153,7 @@ export default function TicketDetailPage() {
                 <span className={styles.infoValue}>{ticket.priority}</span>
               </div>
               <div className={styles.infoItem}>
-                <span className={styles.infoLabel}>建单时间</span>
+                <span className={styles.infoLabel}>生成时间</span>
                 <span className={styles.infoValue}>{formatTime(ticket.opened_at)}</span>
               </div>
               <div className={styles.infoItem}>
@@ -170,7 +180,7 @@ export default function TicketDetailPage() {
               <div className={styles.infoItem}>
                 <span className={styles.infoLabel}>状态</span>
                 <span className={styles.infoValue}>
-                  {STATUS_TEXT[ticket.status] ?? ticket.status}
+                  {STATUS_TEXT[ticket.status] ?? "未知状态"}
                 </span>
               </div>
             </div>
@@ -192,7 +202,7 @@ export default function TicketDetailPage() {
               ) : (
                 <div className={styles.resultBox}>
                   <strong>{ticketSourceText(ticket)}</strong>
-                  <span>该工单未关联分析复盘，不展示五色分析结论。</span>
+                  <span>该任务未关联分析复盘，不展示五色分析结论。</span>
                   <a href="#evidence-chain">查看来源与证据</a>
                 </div>
               )}
@@ -256,9 +266,9 @@ export default function TicketDetailPage() {
                     {ticket.history.map((entry, index) => (
                       <tr key={`${entry.action}-${entry.at}-${index}`}>
                         <td className={styles.td}>
-                          {ACTION_TEXT[entry.action] ?? entry.action}
+                          {ACTION_TEXT[entry.action] ?? "其他操作"}
                         </td>
-                        <td className={styles.td}>{entry.actor}</td>
+                        <td className={styles.td}>{actorText(entry.actor)}</td>
                         <td className={styles.td}>{entry.note ?? "—"}</td>
                         <td className={styles.td}>{formatTime(entry.at)}</td>
                       </tr>

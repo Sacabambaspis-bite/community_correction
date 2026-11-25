@@ -1,4 +1,4 @@
-/* 管理端逾期标记：红色仅取 grading 色码令牌，并同屏说明来源与工单入口。 */
+/* 管理端逾期标记：红色仅取 grading 色码令牌，并同屏说明来源与复核任务入口。 */
 import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import type { SessionKind, SubjectOverdue } from "../api/types";
@@ -38,7 +38,7 @@ export function OverdueBadge({ subjectId, overdue }: OverdueBadgeProps) {
         className={styles.link}
         to={`/admin/tickets?subject_id=${encodeURIComponent(subjectId)}`}
       >
-        查看逾期工单
+        查看逾期任务
       </Link>
     </span>
   );

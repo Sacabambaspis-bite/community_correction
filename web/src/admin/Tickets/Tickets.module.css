@@ -1,4 +1,4 @@
-/* 复核队列与工单详情共用的样式，颜色仅引用 tokens 变量。 */
+/* 复核队列与复核任务详情共用的样式，颜色仅引用 tokens 变量。 */
 .filters {
   display: flex;
   flex-wrap: wrap;
@@ -103,6 +103,11 @@
   padding: var(--space-3);
   border-bottom: 1px solid var(--color-border);
   vertical-align: top;
+}
+
+/* 对象名、状态与时间等短文本不换行，窄屏由 .tableWrap 横向滚动兜底。 */
+.nowrap {
+  white-space: nowrap;
 }
 
 .row {

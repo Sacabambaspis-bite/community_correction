@@ -187,7 +187,7 @@ export type TicketDetailJson = {
   overdue_days?: number;
 };
 
-/** ui@1.2 §4.4；逾期工单无复盘色码，且可不设截止时间。 */
+/** ui@1.2 §4.4；逾期任务无复盘色码，且可不设截止时间。 */
 export type TicketListItem = {
   ticket_id: string;
   subject_id: string;

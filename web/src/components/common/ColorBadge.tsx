@@ -1,9 +1,11 @@
-/* 管理端专用：色码必须与规则编号、证据入口同屏（ui@1.2 §5.2）。
+/* 管理端专用：色码必须与规则名称、证据入口同屏（ui@1.2 §5.2）。
+ * 规则编号只用于接口与留痕，界面统一显示中文名称。
  * 用户端组件禁止 import 本文件。
  */
 import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { COLOR_META, type Color } from "../../lib/colors";
+import { ruleListText } from "../../lib/ruleText";
 import styles from "./ColorBadge.module.css";
 
 type ColorBadgeProps = {
@@ -31,7 +33,7 @@ export function ColorBadge({ color, rules, evidenceHref, at }: ColorBadgeProps) 
         <span className={styles.dot} aria-hidden="true" />
         {meta.label}
       </span>
-      <span className={styles.rules}>{rules.join("、")}</span>
+      <span className={styles.rules}>{ruleListText(rules)}</span>
       {evidenceHref ? (
         <Link className={styles.link} to={evidenceHref}>
           查看依据
