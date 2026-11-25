@@ -21,6 +21,8 @@ class ProviderInput:
     transcript_path: str | None = None
     duration_sec: float = 0.0
     speech_ratio: float = 0.0
+    # ASR 从音频中解析出的情绪标签（如 SenseVoice 的 <|NEUTRAL|>），供 emotion 通道复用。
+    emotion_hint: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

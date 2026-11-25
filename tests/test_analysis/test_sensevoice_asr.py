@@ -12,7 +12,10 @@ from app.analysis.models import AnalysisInput, ProviderInput
 from app.analysis.providers import build_providers
 from app.analysis.providers.mock_asr import MockAsrProvider
 from app.analysis.providers.scenarios import get_scenario
-from app.analysis.providers.sensevoice_asr import SenseVoiceAsrProvider
+from app.analysis.providers.sensevoice_asr import (
+    DEFAULT_TIMEOUT_SEC,
+    SenseVoiceAsrProvider,
+)
 
 POST_TARGET = "app.analysis.providers.sensevoice_asr.httpx.post"
 TEST_URL = "http://sensevoice.test/recognize"
@@ -65,9 +68,41 @@ def test_success_returns_real_text(
 
     call = mock_post.call_args
     assert call.args[0] == TEST_URL
-    assert call.kwargs["headers"] == {"Authorization": f"Bearer {TEST_KEY}"}
-    assert call.kwargs["timeout"] == 10.0
-    assert call.kwargs["files"]["file"][0] == "audio.wav"
+    assert call.kwargs["headers"] == {"X-API-Key": TEST_KEY}
+    assert call.kwargs["timeout"] == DEFAULT_TIMEOUT_SEC
+    assert call.kwargs["files"]["audio"][0] == "audio.wav"
+
+
+@patch(POST_TARGET)
+def test_success_strips_sensevoice_tags(
+    mock_post: MagicMock, sensevoice_env: None, provider_input: ProviderInput
+) -> None:
+    mock_post.return_value = _ok_response(
+        {
+            "text": "<|zh|><|NEUTRAL|><|Speech|><|withitn|>今天状态不错。",
+            "segments": ["<|zh|><|NEUTRAL|><|Speech|><|withitn|>今天状态不错。"],
+        }
+    )
+
+    result = _provider().analyze(provider_input)
+
+    assert result["status"] == "ok"
+    assert result["output"]["char_count"] == len("今天状态不错。")
+    assert (
+        _transcript_file(provider_input).read_text(encoding="utf-8")
+        == "今天状态不错。"
+    )
+
+
+@patch(POST_TARGET)
+def test_timeout_env_override(
+    mock_post: MagicMock, sensevoice_env: None, provider_input: ProviderInput
+) -> None:
+    with patch.dict("os.environ", {"SENSEVOICE_TIMEOUT_SEC": "45"}, clear=False):
+        mock_post.return_value = _ok_response({"text": "文本"})
+        _provider().analyze(provider_input)
+
+    assert mock_post.call_args.kwargs["timeout"] == 45.0
 
 
 @patch(POST_TARGET)
@@ -160,15 +195,22 @@ def test_pipeline_success_with_real_api(
     run_pipeline,
     analysis_input: AnalysisInput,
 ) -> None:
-    mock_post.return_value = _ok_response({"text": "真实转写文本"})
+    mock_post.return_value = _ok_response(
+        {"text": "<|zh|><|NEUTRAL|><|Speech|><|withitn|>真实转写文本"}
+    )
 
     run = run_pipeline(analysis_input)
 
     asr = run.result["channels"]["asr"]
+    emotion = run.result["channels"]["emotion"]
     assert run.analysis_status == "done"
     assert asr["status"] == "ok"
     assert asr["model_version"] == "sensevoice-asr@1.0"
     assert asr["output"]["char_count"] == len("真实转写文本")
+    # 情绪通道复用 ASR 标签，不再走 mock。
+    assert emotion["status"] == "ok"
+    assert emotion["model_version"] == "sensevoice-emotion@1.0"
+    assert emotion["output"] == {"valence": 0.0, "arousal": 0.25, "label": "neutral"}
 
 
 @patch(POST_TARGET)
@@ -186,10 +228,12 @@ def test_pipeline_timeout_degrades_without_blocking(
     assert run.analysis_status == "degraded"
     assert asr["status"] == "degraded"
     assert asr["reason"] == "sensevoice_fallback"
-    # 既有契约：ASR 非 ok 时 psych 跳过；emotion/face 不受影响，管线不失败。
+    # ASR 不可用时 psych 跳过、emotion 无标签可复用而标记降级；face 不受影响。
     assert run.result["channels"]["psych"]["status"] == "skipped"
     assert run.result["channels"]["psych"]["reason"] == "asr_unavailable"
-    assert run.result["channels"]["emotion"]["status"] == "ok"
+    emotion = run.result["channels"]["emotion"]
+    assert emotion["status"] == "degraded"
+    assert emotion["reason"] == "sensevoice_emotion_unavailable"
     assert run.result["channels"]["face"]["status"] == "ok"
     assert run.result["degraded"] is True
     assert run.result["needs_review"] is True

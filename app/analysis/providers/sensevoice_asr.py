@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -21,7 +22,34 @@ logger = logging.getLogger(__name__)
 
 ENV_URL = "SENSEVOICE_API_URL"
 ENV_KEY = "SENSEVOICE_API_KEY"
-TIMEOUT_SEC = 10.0
+ENV_TIMEOUT = "SENSEVOICE_TIMEOUT_SEC"
+# 云端 SenseVoice 需先经 ffmpeg 转码再推理，冷启动实测约 20s，默认给足超时。
+DEFAULT_TIMEOUT_SEC = 120.0
+TIMEOUT_SEC = DEFAULT_TIMEOUT_SEC
+
+# SenseVoice 返回会内嵌 <|zh|><|NEUTRAL|><|Speech|><|withitn|> 之类的控制标签。
+_TAG_PATTERN = re.compile(r"<\|[^|]*\|>")
+_TAG_CAPTURE = re.compile(r"<\|([^|]+)\|>")
+
+# SenseVoice 支持的情感标签；与 <|Speech|> 等音频事件标签区分开。
+_EMOTION_LABELS = frozenset(
+    {"NEUTRAL", "HAPPY", "SAD", "ANGRY", "FEARFUL", "DISGUSTED", "SURPRISED"}
+)
+_AUDIO_EVENTS = frozenset(
+    {"SPEECH", "BGM", "APPLAUSE", "LAUGHTER", "CRYING", "COUGH", "SNEEZE"}
+)
+
+
+def sensevoice_timeout() -> float:
+    """超时可经 SENSEVOICE_TIMEOUT_SEC 覆盖，非法值回落到默认值。"""
+    raw = (os.environ.get(ENV_TIMEOUT) or "").strip()
+    if not raw:
+        return DEFAULT_TIMEOUT_SEC
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_TIMEOUT_SEC
+    return value if value > 0 else DEFAULT_TIMEOUT_SEC
 
 
 def sensevoice_settings() -> tuple[str, str]:
@@ -41,16 +69,19 @@ class SenseVoiceAsrProvider:
     version = "sensevoice-asr@1.0"
 
     def __init__(
-        self, scenario: dict[str, Any], *, timeout: float = TIMEOUT_SEC
+        self, scenario: dict[str, Any], *, timeout: float | None = None
     ) -> None:
         self._scenario = scenario
         self._mock = MockAsrProvider(scenario)
-        self._timeout = timeout
+        self._timeout = timeout if timeout is not None else sensevoice_timeout()
+        # 本次成功识别时解析出的情绪标签；供 pipeline 传给 emotion 通道复用。
+        self.last_emotion: dict[str, Any] | None = None
 
     def available(self) -> bool:
         return True
 
     def analyze(self, input: ProviderInput) -> dict[str, Any]:
+        self.last_emotion = None
         if not input.audio_path:
             raise ValueError("audio_unavailable")
 
@@ -69,16 +100,33 @@ class SenseVoiceAsrProvider:
             with audio_file.open("rb") as handle:
                 response = httpx.post(
                     url,
-                    files={"file": ("audio.wav", handle, "audio/wav")},
-                    headers={"Authorization": f"Bearer {api_key}"},
+                    # Cloud SenseVoice 服务端期望 multipart 字段名为 'audio'（不是 'file'）。
+                    files={"audio": ("audio.wav", handle, "audio/wav")},
+                    # Cloud SenseVoice 服务端使用 X-API-Key 头认证（不是 Authorization Bearer）。
+                    headers={"X-API-Key": api_key},
                     timeout=self._timeout,
                 )
             response.raise_for_status()
-            transcript = self._extract_text(response.json())
+            payload = response.json()
+            transcript = self._extract_text(payload)
             if not transcript:
                 raise ValueError("sensevoice_empty_text")
+            self.last_emotion = self._parse_emotion(payload)
+        except httpx.HTTPStatusError as exc:
+            # 记状态码（不记响应体，避免泄露密钥或返回文本）。
+            logger.warning(
+                "sensevoice http_error status=%s (%s), fallback to mock",
+                exc.response.status_code,
+                type(exc).__name__,
+            )
+            return self._fallback(input)
+        except httpx.TimeoutException as exc:
+            logger.warning(
+                "sensevoice timeout (%s), fallback to mock",
+                type(exc).__name__,
+            )
+            return self._fallback(input)
         except Exception as exc:
-            # 日志只记异常类型，不记响应体、转写文本或密钥。
             logger.warning(
                 "sensevoice request failed (%s), fallback to mock",
                 type(exc).__name__,
@@ -100,14 +148,32 @@ class SenseVoiceAsrProvider:
         }
 
     @staticmethod
-    def _extract_text(payload: Any) -> str:
-        """兼容 {"text": ...} 与 {"data": {"text": ...}} 两种返回结构。"""
+    def _raw_text(payload: Any) -> str:
+        """兼容 {"text": ...} 与 {"data": {"text": ...}}，保留原始标签。"""
         if not isinstance(payload, dict):
             return ""
         text = payload.get("text")
         if text is None and isinstance(payload.get("data"), dict):
             text = payload["data"].get("text")
-        return text.strip() if isinstance(text, str) else ""
+        return text if isinstance(text, str) else ""
+
+    @staticmethod
+    def _extract_text(payload: Any) -> str:
+        """剥离 SenseVoice 控制标签后返回纯转写文本。"""
+        return _TAG_PATTERN.sub("", SenseVoiceAsrProvider._raw_text(payload)).strip()
+
+    @staticmethod
+    def _parse_emotion(payload: Any) -> dict[str, Any] | None:
+        """从响应标签中提取情感与音频事件；无情感标签时返回 None。"""
+        raw = SenseVoiceAsrProvider._raw_text(payload)
+        if not raw:
+            return None
+        tags = [tag.strip().upper() for tag in _TAG_CAPTURE.findall(raw)]
+        label = next((tag for tag in tags if tag in _EMOTION_LABELS), None)
+        if label is None:
+            return None
+        event = next((tag for tag in tags if tag in _AUDIO_EVENTS), None)
+        return {"label": label, "event": event}
 
     def _fallback(self, input: ProviderInput) -> dict[str, Any]:
         """保留 Mock 的可用输出，仅把通道标记为降级，不阻塞后续通道。"""

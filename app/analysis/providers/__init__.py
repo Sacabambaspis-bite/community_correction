@@ -12,6 +12,7 @@ from app.analysis.providers.sensevoice_asr import (
     SenseVoiceAsrProvider,
     sensevoice_configured,
 )
+from app.analysis.providers.sensevoice_emotion import SenseVoiceEmotionProvider
 
 
 def build_mock_providers(scenario: str) -> dict[str, BaseProvider]:
@@ -25,11 +26,17 @@ def build_mock_providers(scenario: str) -> dict[str, BaseProvider]:
 
 
 def build_providers(scenario: str) -> dict[str, BaseProvider]:
-    """默认注册表：配置 SenseVoice 时 ASR 走真实 API，其余通道仍为 Mock。"""
+    """默认注册表：配置 SenseVoice 时 ASR 与 emotion 走真实结果，其余仍为 Mock。"""
     data = get_scenario(scenario)
-    asr = SenseVoiceAsrProvider(data) if sensevoice_configured() else MockAsrProvider(data)
+    if sensevoice_configured():
+        return {
+            "asr": SenseVoiceAsrProvider(data),
+            "emotion": SenseVoiceEmotionProvider(data),
+            "face": MockFaceProvider(data),
+            "psych": MockPsychProvider(data),
+        }
     return {
-        "asr": asr,
+        "asr": MockAsrProvider(data),
         "emotion": MockEmotionProvider(data),
         "face": MockFaceProvider(data),
         "psych": MockPsychProvider(data),
@@ -39,6 +46,7 @@ def build_providers(scenario: str) -> dict[str, BaseProvider]:
 __all__ = [
     "BaseProvider",
     "SenseVoiceAsrProvider",
+    "SenseVoiceEmotionProvider",
     "build_mock_providers",
     "build_providers",
     "get_scenario",

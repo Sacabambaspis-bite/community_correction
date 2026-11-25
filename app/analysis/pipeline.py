@@ -321,17 +321,28 @@ def run_analysis(
         started_at = _iso_time(time_source)
 
         channels: dict[str, dict[str, Any]] = {}
-        for name in ("asr", "emotion"):
-            provider = registry[name]
-            if not input.audio_path:
+        asr_provider = registry["asr"]
+        emotion_provider = registry["emotion"]
+        if not input.audio_path:
+            for name in ("asr", "emotion"):
                 channels[name] = _channel(
                     name=name,
-                    provider=provider,
+                    provider=registry[name],
                     status="skipped",
                     reason="audio_unavailable",
                 )
-            else:
-                channels[name] = _run_provider(name, provider, provider_input)
+        else:
+            channels["asr"] = _run_provider("asr", asr_provider, provider_input)
+            # 情绪通道复用 ASR 解析出的 SenseVoice 情感标签，不重复请求云端。
+            emotion_hint = getattr(asr_provider, "last_emotion", None)
+            emotion_input = (
+                replace(provider_input, emotion_hint=emotion_hint)
+                if emotion_hint
+                else provider_input
+            )
+            channels["emotion"] = _run_provider(
+                "emotion", emotion_provider, emotion_input
+            )
 
         face_provider = registry["face"]
         if not input.face_path:
