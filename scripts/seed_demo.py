@@ -55,7 +55,7 @@ GRADING_VERSION = "grading@1.2"
 COLOR_ORDER = ("green", "blue", "yellow", "orange", "red")
 
 SUBJECT_SEEDS = (
-    ("S001", "张某某", "male", 1985),
+    ("S001", "张三", "male", 1985),
     ("S002", "李某某", "female", 1992),
     ("S003", "王某某", "male", 1978),
     ("S004", "赵某某", "female", 1990),

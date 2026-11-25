@@ -68,7 +68,7 @@ export default function FeedbackPage() {
           <p className={styles.footerHint}>
             <Link to="/capture">返回首页</Link>
             {" · "}
-            <Link to="/consent">返回知情同意</Link>
+            <Link to="/login">返回登录页</Link>
           </p>
         </>
       ) : null}

@@ -11,17 +11,18 @@ export function EntryPage() {
           前端原型入口 · {USE_MOCK ? "Mock 数据模式" : "直连后端 /api"}
         </p>
         <div className={styles.entryLinks}>
-          <Link className={styles.linkCard} to="/consent">
+          <Link className={styles.linkCard} to="/login">
             <strong>用户端</strong>
-            <span>知情同意 → 采集引导 → 结果反馈</span>
+            <span>登录（含知情同意）→ 事项选择 → 采集 → 结果反馈</span>
           </Link>
           <Link className={styles.linkCard} to="/admin/subjects">
             <strong>管理端</strong>
-            <span>对象列表 / 状态看板 / 复核队列</span>
+            <span>对象列表（含状态概览）→ 对象详情 → 复核队列</span>
           </Link>
         </div>
         <p className={styles.entryHint}>
-          原型阶段不提供登录页，角色与 token 由 web/.env 注入。
+          用户端使用开发测试账号登录（登录页内含知情同意）；管理端角色与 token
+          由 web/.env 注入。
         </p>
       </div>
     </main>

@@ -45,7 +45,7 @@ export function FeedbackPanel({ feedback }: { feedback: FeedbackData }) {
       </div>
 
       <div className={styles.footer}>
-        <Link to="/consent">查看或撤回知情同意</Link>
+        <Link to="/login">切换账号</Link>
       </div>
     </section>
   );

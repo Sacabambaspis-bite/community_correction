@@ -1,21 +1,26 @@
-/* 路由守卫：用户端未同意强制回 /consent；管理端非 staff 显示 403 提示。
- * 原型不做真实登录页，token / 角色由 web/.env 注入（ui@1.2 §2）。
+/* 路由守卫：用户端需先登录（含知情同意）才能进入采集流程；管理端非 staff 显示 403 提示。
+ * 登录页合并了知情同意，未登录或未同意统一回 /login（ui.md v1.3 实现补记）。
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { ErrorBanner, Forbidden, LoadingState } from "../components/common/StateViews";
 import { getConsent } from "../api/user";
+import { getUserSession } from "./auth";
 import { errorText } from "./errorMessages";
 import { ApiError } from "./http";
 import { ROLE } from "./env";
 
-type ConsentGuardState = "loading" | "granted" | "denied" | "error";
+type GuardState = "loading" | "granted" | "denied" | "error";
 
-export function RequireConsent({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<ConsentGuardState>("loading");
+export function RequireUser({ children }: { children: ReactNode }) {
+  const [state, setState] = useState<GuardState>("loading");
   const [message, setMessage] = useState("");
 
   useEffect(() => {
+    if (!getUserSession()) {
+      setState("denied");
+      return undefined;
+    }
     let alive = true;
     getConsent()
       .then((envelope) => {
@@ -27,7 +32,11 @@ export function RequireConsent({ children }: { children: ReactNode }) {
           setMessage(errorText(envelope.code, envelope.message));
           return;
         }
-        setState(envelope.data.general.granted ? "granted" : "denied");
+        const granted =
+          envelope.data.general.granted &&
+          envelope.data.face.granted &&
+          envelope.data.audio.granted;
+        setState(granted ? "granted" : "denied");
       })
       .catch((error: unknown) => {
         if (!alive) {
@@ -46,10 +55,10 @@ export function RequireConsent({ children }: { children: ReactNode }) {
   }, []);
 
   if (state === "loading") {
-    return <LoadingState text="正在确认同意状态…" />;
+    return <LoadingState text="正在确认登录与同意状态…" />;
   }
   if (state === "denied") {
-    return <Navigate to="/consent" replace />;
+    return <Navigate to="/login" replace />;
   }
   if (state === "error") {
     return <ErrorBanner message={message} onRetry={() => window.location.reload()} />;
