@@ -43,8 +43,12 @@
 | P13 思想汇报同步脚手架 | 2026-11-25 | 新增 `sensevoice_syncs` 表与迁移；新增同步/列表/详情三个管理端端点（功能开关默认关闭，失败整体回滚）；新增严格 SenseVoice 转写 + 情绪适配层（无 Mock 回退）；对象详情页新增「思想汇报同步」面板；13 条契约测试 | `app/analysis/sensevoice_sync.py`、`app/db/`、`app/api/`、`web/src/admin/SubjectDetail/`、`docs/contracts/{db,api,ui}.md` | 见 §2.3 |
 | P14 管理端对象详情增强 | 2026-11-25 | 列表姓名跳转详情；详情补基础档案（性别/年龄/身份证号等）；新增按日期查看打卡影像与思想汇报录音（在线预览/播放，敏感面板默认折叠）；状态看板整体合并进详情并下线独立入口 | `web/src/api/`、`web/src/mock/`、`web/src/admin/`、`web/src/App.tsx` | 见 §2.4 |
 | P15 管理端本地化与术语统一 | 2026-11-25 | ① 色码规则、触发规则、证据字段/阈值/取值全部中文化，未知项中性占位；② 移除对象名称下方 UUID；③ 「工单 / 建单」统一改称「复核任务 / 生成任务」，同步五份契约、README、PRD、分级说明与架构文档；④ 修复对象列表「状态 / 最近签到」与复核队列「对象 / 状态」等短文本换行 | `web/src/lib/ruleText.ts`、`web/src/admin/`、`web/src/components/common/ColorBadge.tsx`、`docs/contracts/`、`README.md` | 见 §2.5（工作区） |
+| P16 管理端媒体读取接入 | 2026-11-25 | 后端新增 `GET /api/admin/subjects/{id}/media`（按日返回打卡影像 URL、汇报音频 URL 与转写文本）与 `GET /api/admin/sessions/{id}/audio`（`audio/wav` + Range）；前端改为带鉴权拉 blob 渲染照片/音频并展示转写；读取转写写 `sensitive.view` 审计；10 条契约测试 | `app/api/routers/admin.py`、`web/src/lib/http.ts`、`web/src/api/`、`web/src/admin/SubjectDetail/`、`docs/contracts/api.md` | — |
+| P17 AI 援助启用与详情页交互收敛 | 2026-11-25 | ① 启动脚本注入 `DEEPSEEK_API_KEY`，AI 援助 `enabled=true` 并实测 SSE 出字；② 删除独立「敏感内容」栏目，留痕提示并入「打卡与思想汇报」；③ 移除「可用日期」文字列表，改为月历选择器（无记录日期置灰禁用）；④ 同步 `ui.md` 区块表与验收清单 | `_start_backend.py`、`start-backend.ps1`、`web/src/admin/SubjectDetail/`、`docs/contracts/ui.md` | — |
+| P18 当日多条记录浏览与时间线合并 | 2026-11-25 | ① `/media` 响应改为 `items[]`（当日全部 captured 会话，按采集时间升序），默认选中最新一条；② 详情区新增「上一条 / 下一条」切换与条数指示，逐条展示影像、录音、转写；③ 独立「会话时间线」改为栏目底部折叠区「全部采集记录（含失败）」；④ 转写审计改为单条汇总并带 `count`；后端 346 passed，前端构建通过 | `app/api/routers/admin.py`、`web/src/api/types.ts`、`web/src/api/mock.ts`、`web/src/admin/SubjectDetail/`、`tests/test_api/test_admin_media.py`、`docs/contracts/api.md`、`docs/contracts/ui.md` | — |
+| P19 情绪结果随录音展示 | 2026-11-25 | `/media` 每条记录的 `emotion` 取自 `analysis_json.channels.emotion`，与录音一一对应；管理端「录音与转写」卡片在转写下方展示「情绪识别：倾向（valence / arousal）· 模型」，降级结果标注「仅供参考」；补 1 条对齐测试（后端 13 passed） | `app/api/routers/admin.py`、`web/src/api/types.ts`、`web/src/api/mock.ts`、`web/src/admin/SubjectDetail/`、`tests/test_api/test_admin_media.py`、`docs/contracts/api.md` | — |
 
-**阶段结论**：P0–P10 已形成「采集 → 数据 → 分析 → 分级 → 复核任务 → 前端」的完整纵向切片并全部提交。P11–P14 已提交（用户端入口、登录页合并同意、思想汇报同步脚手架、管理端对象详情增强），P15 为当前工作区增量（管理端本地化、术语统一与表格换行修复）。其中 P13 的同步能力因 SenseVoice 服务不可达与情绪接口协议未确认而**默认关闭**，不产生真实同步数据；P14 的媒体与档案字段仍为前端 mock 扩展，契约待补；P15 仅调整展示文案与样式，不改接口、状态机与流转规则。后端测试总数由 224 增至 286。
+**阶段结论**：P0–P10 已形成「采集 → 数据 → 分析 → 分级 → 复核任务 → 前端」的完整纵向切片并全部提交。P11–P14 已提交（用户端入口、登录页合并同意、思想汇报同步脚手架、管理端对象详情增强），P15、P16 已完成（管理端本地化与术语统一、媒体后端接入）。其中 P13 的同步能力因 SenseVoice 服务不可达与情绪接口协议未确认而**默认关闭**，不产生真实同步数据；P14 的媒体与档案字段仍为前端 mock 扩展，契约待补；P15 仅调整展示文案与样式，不改接口、状态机与流转规则。后端测试总数由 224 增至 286。
 
 ### 2.1 进度记录：P11 用户端入口与跳转调整
 
@@ -88,8 +92,8 @@
 | 变更内容 | ① 对象列表的**姓名**改为详情链接（`/admin/subjects/:subjectId`）<br>② 详情页新增基础档案：性别、年龄、身份证号、联系电话、住址、矫正类别与起止日期；`SubjectDetail` 类型扩展 `SubjectProfileFields`<br>③ 新增「打卡与思想汇报」日期筛选：日期输入 + 有记录日期快捷按钮，按日展示打卡影像（内联预览）与思想汇报录音（原生播放器），统一放入默认折叠的敏感面板<br>④ 原独立状态看板内容（五色分布、近 7 天趋势、待复核数、最近采集、逾期标记）整体迁入详情页，新增 `TrendStrip`；删除 `web/src/admin/Dashboard/`，导航仅保留「对象列表」「复核队列」<br>⑤ 旧地址 `/admin/dashboard` 重定向至 `/admin/subjects`（绝对路径，避免相对解析成 `/admin/dashboard/subjects`）<br>⑥ 前端 mock 扩展：`subject.json` 增加档案 `profiles` 与按日媒体 `media`，`dashboard.json` 增加对象级 `variants`；新增 `GET /api/admin/subjects/{id}/media` mock 分支 |
 | 完成状态 | 已完成（前端）；`npm run typecheck`、`npm run build` 通过；浏览器实测（mock 模式）：姓名链接 URL 正确、档案字段完整显示、默认日期影像加载成功、录音可播放至结束、无录音日期显示中性提示、`/admin/dashboard` 最终停在 `/admin/subjects`、全程无 console error |
 | 影响范围 | 仅 `web/`：`src/api/{types,admin,mock}.ts`、`src/mock/{subject,dashboard}.json`、`src/admin/{AdminLayout.tsx,Subjects/*,SubjectDetail/*}`、`src/App.tsx`、`src/EntryPages.tsx`；未改动 `app/`，`docs/contracts/ui.md` 仅追加补记 9，后端 pytest 不受影响 |
-| 后续待办 | ① 契约补齐：档案字段（含身份证号脱敏与可见范围）、媒体端点（鉴权/留存期/`audit_logs` 留痕）、单对象 dashboard 变体语义<br>② 真实接口联调：影像与音频改为后端返回，替换文生图占位与 2 秒静音 WAV<br>③ 调阅留痕接入后把敏感面板的提示文案改为真实审计状态 |
-| 备注 | 媒体为**演示素材**：影像走文生图占位服务，录音为运行时构造的 2 秒单声道 WAV；不写入 localStorage/IndexedDB，不自动播放；密码、身份证号等敏感信息仅用于原型展示，不可用于生产 |
+| 后续待办 | ① 契约补齐：档案字段（含身份证号脱敏与可见范围）、媒体端点（鉴权/留存期/`audit_logs` 留痕）、单对象 dashboard 变体语义<br>② 真实接口联调：影像与音频改为后端返回，替换文生图占位与 2 秒静音 WAV（P16 已完成）<br>③ 调阅留痕接入后把敏感面板的提示文案改为真实审计状态 |
+| 备注 | 媒体为**演示素材**：影像走文生图占位服务，录音为运行时构造的 2 秒单声道 WAV（仅 mock 模式）；P16 起真实模式改走后端 `/media` 与 `/audio`，返回采集落盘的照片、录音与转写。不写入 localStorage/IndexedDB，不自动播放；密码、身份证号等敏感信息仅用于原型展示，不可用于生产 |
 
 ### 2.5 进度记录：P15 管理端本地化、术语统一与换行修复
 
@@ -193,7 +197,7 @@
 | 管理端对象详情「思想汇报同步」面板 + 13 条契约测试 | 已实现（P13） | 本次提交 |
 | `/capture` 新增「AI援助」「教育学习」入口 + `/pending` 功能待开发占位页（**暂无后端支持**） | 已实现（P11） | 本次提交 |
 | 管理端对象列表姓名跳转详情 + 基础档案字段（性别/年龄/身份证号/住址等） | 已实现（P14，Mock） | 本次提交 |
-| 对象详情按日期筛选打卡影像与思想汇报录音（在线预览/播放，敏感面板默认折叠） | 已实现（P14，Mock 媒体） | 本次提交 |
+| 对象详情按日期筛选打卡影像与思想汇报录音（在线预览/播放，敏感面板默认折叠） | 已实现（P14 前端；P16 后端真实媒体与转写） | `P14` → `P16` |
 | 状态看板内容合并进对象详情、删除独立看板页面与导航；旧地址重定向对象列表 | 已实现（P14） | 本次提交 |
 | 心理状态趋势聚合 API `GET /api/admin/subjects/{id}/trends`（任意区间、逐日补齐、多维指标、9 个信号码、无新增表） | 已实现（P16） | 本次提交 |
 | 管理端对象详情「心理状态分析看板」：区间条 + Russell 散点 + 五色热力图 + 稳定性柱状 + 依从性日历（Recharts） | 已实现（P16，mock 联调） | 本次提交 |
