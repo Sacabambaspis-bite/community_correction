@@ -16,7 +16,7 @@ import json
 import sys
 import uuid
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -63,9 +63,9 @@ SUBJECT_SEEDS = (
     ("S006", "陈某某", "unknown", 1988),
 )
 
-#: S001~S005 每人 7~10 条；S006 仅 1 条（危机演示）。
+#: S001 旧版会话由 14 天趋势窗口数据取代（其余对象保持原数量）。
 SESSION_COUNTS = {
-    "S001": 8,
+    "S001": 0,
     "S002": 9,
     "S003": 7,
     "S004": 8,
@@ -75,7 +75,7 @@ SESSION_COUNTS = {
 
 #: S001~S005 每人 2 条降级会话（约 75% 为 ok）：首个为 partial，第二个为 no_audio。
 DEGRADED_INDICES = {
-    "S001": (4, 8),
+    "S001": (),
     "S002": (4, 8),
     "S003": (3, 7),
     "S004": (4, 8),
@@ -145,6 +145,65 @@ REVIEW_PLAN = {
         ),
         "evidence_field": "psych.output.intent_flag",
     },
+}
+
+
+#: S001 演示波动：以运行当天为终点的连续 14 天（管理端趋势页演示专用）。
+S001_WINDOW_DAYS = 14
+S001_DAY_COLORS = (
+    "green",
+    "green",
+    "blue",
+    "yellow",
+    "yellow",
+    "orange",
+    "blue",
+    "green",
+    "blue",
+    "yellow",
+    "orange",
+    "orange",
+    "yellow",
+    "blue",
+)
+#: 缺 checkin 的日索引（制造行为缺口）。
+S001_MISSING_CHECKIN = frozenset({2, 8})
+#: 缺 report 的日索引（该日仍保留复盘色块）。
+S001_MISSING_REPORT = frozenset({10})
+#: 一致性 low 的 report 日与其中触发 conflict 的日。
+S001_LOW_CONSISTENCY = frozenset({6, 9})
+S001_CONFLICT_DAYS = frozenset({6})
+#: 分析降级（analysis_json.degraded=true）的 report 日。
+S001_DEGRADED_DAYS = frozenset({4, 13})
+#: 日索引 -> (signal_strength, text_valence, arousal, emotion_label)。
+S001_REPORT_PROFILE = {
+    0: (45.0, -0.05, 0.42, "neutral"),
+    1: (30.0, -0.60, 0.22, "low"),
+    2: (50.0, -0.10, 0.48, "neutral"),
+    3: (25.0, 0.45, 0.50, "neutral"),
+    4: (48.0, -0.15, 0.45, "neutral"),
+    5: (78.0, -0.40, 0.80, "negative"),
+    6: (34.0, -0.70, 0.20, "low"),
+    7: (52.0, 0.00, 0.46, "neutral"),
+    8: (46.0, -0.08, 0.44, "neutral"),
+    9: (28.0, -0.75, 0.18, "low"),
+    11: (82.0, -0.45, 0.85, "strong_negative"),
+    12: (35.0, 0.45, 0.52, "neutral"),
+    13: (44.0, -0.12, 0.40, "neutral"),
+}
+#: S001 五色 -> (规则, trend_color, single_session_risk, consistency)。
+S001_REVIEW_META = {
+    "green": ("R_TREND_GREEN", "green", "none", "high"),
+    "blue": ("R_TREND_BLUE", "blue", "none", "medium"),
+    "yellow": ("R_TREND_YELLOW", "yellow", "none", "medium"),
+    "orange": ("R_SINGLE_ORANGE", "green", "orange", "low"),
+}
+#: 规则 -> (threshold_key, threshold_value, offset_score)。
+S001_EVIDENCE_THRESHOLDS = {
+    "R_TREND_GREEN": ("TREND_GREEN_OFFSET_MAX", 0.8, 0.42),
+    "R_TREND_BLUE": ("TREND_BLUE_OFFSET_MIN", 0.8, 1.02),
+    "R_TREND_YELLOW": ("TREND_YELLOW_OFFSET_MIN", 1.2, 1.31),
+    "R_SINGLE_ORANGE": ("SINGLE_ORANGE_SIGNAL_MIN", 70.0, 1.09),
 }
 
 
@@ -234,8 +293,15 @@ def _analysis_json(
     consistency: str,
     seed: int,
     intent_flag: str = "none",
+    arousal: Optional[float] = None,
+    emotion_label: Optional[str] = None,
+    conflict: Optional[bool] = None,
 ) -> str:
-    """组装严格符合 analysis.schema.json 的单次结果；skipped 通道 output=null。"""
+    """组装严格符合 analysis.schema.json 的单次结果；skipped 通道 output=null。
+
+    `arousal` / `emotion_label` / `conflict` 为演示波动预留的可选覆盖；
+    不传时保持原有派生逻辑不变。
+    """
     if degraded:
         asr = _channel("skipped", "mock-asr@1.0", 0, 0.0, None, "audio_unavailable")
         emotion = _channel(
@@ -268,7 +334,7 @@ def _analysis_json(
             "text_channel_degraded",
         )
         agree_count = 1
-        conflict = False
+        conflict = False if conflict is None else conflict
         low_confidence = ["asr", "emotion"]
         summary = "音频通道不可用，仅表情与弱文本信号，建议人工复核"
     else:
@@ -291,8 +357,12 @@ def _analysis_json(
             0.81,
             {
                 "valence": valence,
-                "arousal": round(0.32 + (seed % 5) * 0.04, 2),
-                "label": "neutral" if signal < 35 else "low",
+                "arousal": arousal
+                if arousal is not None
+                else round(0.32 + (seed % 5) * 0.04, 2),
+                "label": emotion_label
+                if emotion_label is not None
+                else ("neutral" if signal < 35 else "low"),
             },
         )
         face = _channel(
@@ -325,7 +395,7 @@ def _analysis_json(
             },
         )
         agree_count = {"high": 3, "medium": 2, "low": 1}[consistency]
-        conflict = consistency == "low"
+        conflict = (consistency == "low") if conflict is None else conflict
         low_confidence = ["face"] if consistency == "low" else []
         summary = (
             "文本出现指向性意图表达，建议立即人工复核"
@@ -367,6 +437,166 @@ def _analysis_json(
         "latency_ms": latency_ms,
     }
     return json.dumps(result, ensure_ascii=False)
+
+
+def _risk_from_signal(signal: float) -> str:
+    if signal >= 70:
+        return "high"
+    if signal >= 55:
+        return "elevated"
+    if signal >= 40:
+        return "watch"
+    return "none"
+
+
+def _s001_report_session_id(day_index: int) -> str:
+    """该日 report 会话 id；缺 report 的日回落到前一有效日（仅用于证据引用）。"""
+    index = day_index
+    while index > 0 and index in S001_MISSING_REPORT:
+        index -= 1
+    return _session_id("S001", 102 + index * 2)
+
+
+def _plan_s001_window(now: datetime) -> list[dict[str, Any]]:
+    """S001 连续 14 天的 checkin / report 会话（新索引从 101 起，避免旧 id 冲突）。"""
+    code = "S001"
+    subject_id = _subject_id(code)
+    today = now.date()
+    rows: list[dict[str, Any]] = []
+    for index in range(S001_WINDOW_DAYS):
+        day = today - timedelta(days=S001_WINDOW_DAYS - 1 - index)
+
+        if index not in S001_MISSING_CHECKIN:
+            session_id = _session_id(code, 101 + index * 2)
+            captured_at = datetime.combine(day, time(9, 0), tzinfo=TZ)
+            base = f"subjects/{subject_id}/sessions/{session_id}"
+            rows.append(
+                {
+                    "code": code,
+                    "subject_id": subject_id,
+                    "session_id": session_id,
+                    "kind": "checkin",
+                    "status": "captured",
+                    "capture_status": "ok",
+                    "face_path": f"{base}/face.jpg",
+                    "audio_path": None,
+                    "transcript_path": None,
+                    "duration_sec": None,
+                    "captured_at": captured_at,
+                    "created_at": captured_at - timedelta(minutes=2),
+                    "codes": [],
+                    "analysis": None,
+                    "analysis_status": "pending",
+                }
+            )
+
+        if index not in S001_MISSING_REPORT:
+            session_id = _session_id(code, 102 + index * 2)
+            captured_at = datetime.combine(day, time(19, 0), tzinfo=TZ)
+            base = f"subjects/{subject_id}/sessions/{session_id}"
+            signal, valence, arousal, label = S001_REPORT_PROFILE[index]
+            degraded = index in S001_DEGRADED_DAYS
+            consistency = (
+                "low"
+                if index in S001_LOW_CONSISTENCY
+                else ("high" if index % 2 == 0 else "medium")
+            )
+            duration_sec = round(20 + (index % 7) * 3, 1)
+            analysis = _analysis_json(
+                session_id=session_id,
+                subject_id=subject_id,
+                captured_at=captured_at,
+                duration_sec=duration_sec,
+                transcript_path=f"{base}/transcript.txt",
+                degraded=degraded,
+                signal=signal,
+                valence=valence,
+                risk_level=_risk_from_signal(signal),
+                consistency=consistency,
+                seed=100 + index,
+                arousal=arousal,
+                emotion_label=label,
+                conflict=index in S001_CONFLICT_DAYS,
+            )
+            rows.append(
+                {
+                    "code": code,
+                    "subject_id": subject_id,
+                    "session_id": session_id,
+                    "kind": "report",
+                    "status": "captured",
+                    "capture_status": "ok",
+                    "face_path": f"{base}/face.jpg",
+                    "audio_path": f"{base}/audio.wav",
+                    "transcript_path": f"{base}/transcript.txt",
+                    "duration_sec": duration_sec,
+                    "captured_at": captured_at,
+                    "created_at": captured_at - timedelta(minutes=2),
+                    "codes": [],
+                    "analysis": analysis,
+                    "analysis_status": "degraded" if degraded else "done",
+                }
+            )
+    return rows
+
+
+def _plan_s001_reviews(now: datetime) -> list[dict[str, Any]]:
+    """S001 每日一条复盘，颜色序列与规则/一致性/人工复核自洽。"""
+    code = "S001"
+    subject_id = _subject_id(code)
+    today = now.date()
+    rows: list[dict[str, Any]] = []
+    for index, color in enumerate(S001_DAY_COLORS):
+        day = today - timedelta(days=S001_WINDOW_DAYS - 1 - index)
+        rule, trend_color, risk, consistency = S001_REVIEW_META[color]
+        created_at = min(datetime.combine(day, time(21, 0), tzinfo=TZ), now)
+        window_start = day - timedelta(days=6)
+        session_id = _s001_report_session_id(index)
+        signal = S001_REPORT_PROFILE.get(
+            index, S001_REPORT_PROFILE[_s001_report_index(index)]
+        )[0]
+        threshold_key, threshold_value, offset_score = S001_EVIDENCE_THRESHOLDS[rule]
+        evidence = [
+            {
+                "rule_id": rule,
+                "rule_version": GRADING_VERSION,
+                "field_path": "channels.psych.output.signal_strength",
+                "observed_value": signal,
+                "threshold_key": threshold_key,
+                "threshold_value": threshold_value,
+                "offset_score": offset_score,
+                "session_id": session_id,
+                "window": [window_start.isoformat(), day.isoformat()],
+                "triggered_at": _iso(created_at),
+            }
+        ]
+        rows.append(
+            {
+                "review_id": _uid("review", f"{code}:{day.isoformat()}"),
+                "subject_id": subject_id,
+                "source_session_id": session_id,
+                "window_start": window_start,
+                "window_end": day,
+                "window_days": 7,
+                "single_session_risk": risk,
+                "trend_color": trend_color,
+                "final_color": color,
+                "consistency": consistency,
+                "manual_review": 1 if consistency == "low" else 0,
+                "rules_fired": [rule],
+                "evidence": evidence,
+                "created_at": created_at,
+            }
+        )
+    return rows
+
+
+def _s001_report_index(day_index: int) -> int:
+    """缺 report 的日回落到前一有效日索引（证据引用用）。"""
+    index = day_index
+    while index > 0 and index in S001_MISSING_REPORT:
+        index -= 1
+    return index
 
 
 def _plan_sessions() -> list[dict[str, Any]]:
@@ -441,6 +671,8 @@ def _plan_sessions() -> list[dict[str, Any]]:
                     "code": code,
                     "subject_id": subject_id,
                     "session_id": session_id,
+                    "kind": "report",
+                    "status": "captured",
                     "capture_status": capture_status,
                     "face_path": face_path,
                     "audio_path": audio_path,
@@ -450,8 +682,12 @@ def _plan_sessions() -> list[dict[str, Any]]:
                     "created_at": created_at,
                     "codes": codes,
                     "analysis": analysis,
+                    "analysis_status": "degraded"
+                    if capture_status != "ok"
+                    else "done",
                 }
             )
+    plan.extend(_plan_s001_window(NOW))
     return plan
 
 
@@ -567,16 +803,15 @@ def _seed(db, plan: list[dict[str, Any]], counts: dict[str, dict[str, int]]) -> 
             CaptureSession(
                 id=row["session_id"],
                 subject_id=row["subject_id"],
-                status="captured",
+                kind=row["kind"],
+                status=row["status"],
                 capture_status=row["capture_status"],
                 face_path=row["face_path"],
                 audio_path=row["audio_path"],
                 transcript_path=row["transcript_path"],
                 duration_sec=row["duration_sec"],
                 captured_at=_iso(row["captured_at"]),
-                analysis_status="degraded"
-                if row["capture_status"] != "ok"
-                else "done",
+                analysis_status=row["analysis_status"],
                 analysis_json=row["analysis"],
                 codes=json.dumps(row["codes"]),
                 created_at=_iso(row["created_at"]),
@@ -636,6 +871,43 @@ def _seed(db, plan: list[dict[str, Any]], counts: dict[str, dict[str, int]]) -> 
         )
         counts["reviews"]["inserted"] += 1
     db.add_all(fresh_reviews)
+    db.flush()
+
+    # S001 连续 14 天每日复盘：按 (subject_id, window_end) 预检查，已存在则跳过。
+    s001_id = _subject_id("S001")
+    existing_window_ends = set(
+        db.scalars(
+            select(Review.window_end).where(Review.subject_id == s001_id)
+        ).all()
+    )
+    for row in _plan_s001_reviews(NOW):
+        window_end = row["window_end"].isoformat()
+        if window_end in existing_window_ends or db.get(
+            Review, row["review_id"]
+        ) is not None:
+            counts["reviews"]["skipped"] += 1
+            continue
+        db.add(
+            Review(
+                id=row["review_id"],
+                subject_id=row["subject_id"],
+                source_session_id=row["source_session_id"],
+                window_start=row["window_start"].isoformat(),
+                window_end=window_end,
+                window_days=row["window_days"],
+                single_session_risk=row["single_session_risk"],
+                trend_color=row["trend_color"],
+                final_color=row["final_color"],
+                consistency=row["consistency"],
+                manual_review=row["manual_review"],
+                rules_fired=json.dumps(row["rules_fired"]),
+                evidence_json=json.dumps(row["evidence"], ensure_ascii=False),
+                grading_version=GRADING_VERSION,
+                created_at=_iso(row["created_at"]),
+            )
+        )
+        existing_window_ends.add(window_end)
+        counts["reviews"]["inserted"] += 1
     db.flush()
 
     # review_tickets：橙 -> P0，黄 -> P1，S006 危机 -> P0

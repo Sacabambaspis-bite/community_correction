@@ -31,6 +31,14 @@
 > 4. 新增业务码 `2004`（同步失败：`transcription_failed` / `emotion_failed`）、`5001`（外部 AI 能力不可用）。
 > 5. 真实情绪分析接口协议未确认前，只落地表、接口与前端面板；禁止用 Mock 结果冒充真实同步。
 
+> **v1.5 实现补记·五（2026-11-25，附加、非破坏）**：新增对象心理状态趋势端点 `GET /api/admin/subjects/{subject_id}/trends`（§7.18）——
+> 1. 支持任意日期区间（`start_date` / `end_date`，闭区间，缺省近 14 天，跨度上限 366 天）；区间内无数据的自然日仍逐日返回，保证前端热力图与日历时序完整。
+> 2. 只读聚合，聚合来源为 `sessions.analysis_json` + `reviews` + `subjects` 频率字段；**不新增表、不新增列、不做迁移**。
+> 3. 返回日粒度五色（`review.color`）、分析侧最高风险档（`analysis_risk_level`）、文本效价/信号均值与标准差、一致性告警计数（degraded / low / conflict）、行为依从性（签到与汇报的 expected / completed / overdue）。
+> 4. 心理学语义只返回机器码 `summary.signals[]`，**不返回中文结论文案**；文案由前端统一映射，以满足 ui@1.2 §6 禁用词规则。
+> 5. 不返回转写原文、音频路径、影像或 `face_path`；不做跨对象聚合或排名；不产生任何处置动作；`degraded` 固定为 `[]`。
+> 6. 保留既有 `GET /api/admin/dashboard` 与 `trend_7d` 不变，供旧页面兼容；新页面改用本端点。
+
 > **术语同步（2026-11-25，编辑器、无版本变更）**：中文表述统一为「复核任务」；`review_tickets`、`/api/admin/tickets`、`ticket_id`、`ticket_closed` 等标识与状态枚举保持不变。
 
 ---## 1. 通用约定
@@ -179,6 +187,7 @@ Authorization: Bearer <token>
 | `POST` | `/api/admin/subjects/{subject_id}/sensevoice-sync` | 已实现（默认关闭） | 触发思想汇报转写 + 情绪同步；受 `SENSEVOICE_SYNC_ENABLED` 控制（见 §7.15） |
 | `GET` | `/api/admin/subjects/{subject_id}/sensevoice-syncs` | 已实现 | 同步记录列表（见 §7.16） |
 | `GET` | `/api/admin/sensevoice-syncs/{sync_id}` | 已实现 | 同步详情（含转写全文与情绪报告，读取留痕；见 §7.17） |
+| `GET` | `/api/admin/subjects/{subject_id}/trends` | 已实现 | 对象心理状态趋势（任意日期区间、多维聚合；见 §7.18） |
 
 ## 6. 序列化脱敏规则
 
@@ -189,6 +198,7 @@ Authorization: Bearer <token>
 | `GET /api/admin/tickets/{id}` | 无 | 但需写 `audit_logs(sensitive.view)` |
 | `GET /api/admin/sessions/{id}/transcript` | 无 | 必须写留痕 |
 | `GET /api/admin/sensevoice-syncs/{id}` | 无 | 含转写原文，必须写留痕 |
+| `GET /api/admin/subjects/{id}/trends` | 转写原文、`transcript_path`、`audio_path`、影像、`face_path` | 仅返回聚合指标，不含个体敏感原文 |
 | 全局日志 | 音频内容、转写原文、面部图 base64、`audio_path` 绝对路径 | 红线 |
 
 `feedback` 只允许返回：`status`、`summary_text`（中性表述）、`suggestion`（枚举）、`next_action`。
@@ -947,6 +957,148 @@ query：`page`（默认 1）、`page_size`（默认 20，最大 100）。对象�
 - 返回数据前写一条 `audit_logs(action=sensitive.view, target_type=sensevoice_sync, target_id={sync_id}, detail_json={"field":"transcript"})`；留痕失败 → `5000 audit_write_failed`，不返回数据；
 - `emotion` 为 `emotion_json` 解析后的对象（结构见 db@1.5 §7.1）。
 
+### 7.18 `GET /api/admin/subjects/{subject_id}/trends`
+
+对象心理状态趋势：按任意日期区间聚合日粒度五色、文本心理指标、一致性与行为依从性，供管理端对象详情页多维度看板使用。需 `staff`。
+
+```bash
+curl "http://localhost:8000/api/admin/subjects/3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c/trends?start_date=2026-11-12&end_date=2026-11-25" \
+  -H "Authorization: Bearer admin_demo"
+```
+
+**查询参数**
+
+| 参数 | 必填 | 默认 | 说明 |
+|---|---|---|---|
+| `start_date` | 否 | `end_date - 13` 天 | `YYYY-MM-DD` 自然日，闭区间 |
+| `end_date` | 否 | 服务端当天 | `YYYY-MM-DD` 自然日，闭区间 |
+| 只传 `start_date` | — | `end_date = start_date + 13` | 保持 14 天窗口 |
+| 只传 `end_date` | — | `start_date = end_date - 13` | 保持 14 天窗口 |
+
+**校验与错误**
+
+| 条件 | 返回 |
+|---|---|
+| 日期非 `YYYY-MM-DD` | `1001`，`message=invalid_date` |
+| `start_date > end_date` | `1001`，`message=invalid_date_range` |
+| 区间跨度 > 366 天（含端点） | `1001`，`message=date_range_too_large` |
+| 对象不存在 | `1004`，`message=not_found` |
+| 区间内无任何会话与复盘 | `code=0`，`days` 逐日返回空指标，不报错 |
+
+**响应 `data`**
+
+```json
+{
+  "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
+  "start_date": "2026-11-12",
+  "end_date": "2026-11-25",
+  "interval_days": { "checkin": 1, "report": 3 },
+  "days": [
+    {
+      "date": "2026-11-20",
+      "review": {
+        "color": "yellow",
+        "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b1c",
+        "rules_fired": ["R_TREND_YELLOW"],
+        "consistency": "medium",
+        "manual_review": false,
+        "evidence_available": true
+      },
+      "analysis_risk_level": "watch",
+      "sessions": { "total": 2, "checkin": 1, "report": 1, "analyzed": 2, "failed": 0 },
+      "text_valence": { "mean": -0.32, "std": 0.11, "count": 2 },
+      "text_signal": { "mean": 48.5, "std": 9.2, "count": 2 },
+      "consistency": { "degraded": 1, "low": 0, "conflict": 0 },
+      "behavior": {
+        "checkin": { "expected": true, "completed": true, "overdue": false },
+        "report": { "expected": true, "completed": true, "overdue": false }
+      }
+    }
+  ],
+  "scatter_points": [
+    {
+      "date": "2026-11-20",
+      "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
+      "captured_at": "2026-11-20T09:12:36+08:00",
+      "kind": "report",
+      "valence": -0.42,
+      "signal": 41.2,
+      "arousal": 0.36,
+      "emotion_label": "negative",
+      "review_color": "yellow",
+      "review_rules": ["R_TREND_YELLOW"],
+      "review_id": "c41d0a77-9b2e-4f83-a1c5-6d7e8f9a0b1c"
+    }
+  ],
+  "summary": {
+    "analyzed_count": 6,
+    "avg_valence": -0.30,
+    "avg_signal": 45.0,
+    "valence_std": 0.21,
+    "signal_std": 11.4,
+    "coverage_rate": 0.83,
+    "quadrants": { "q1": 1, "q2": 2, "q3": 2, "q4": 1 },
+    "signals": ["low_arousal_negative", "valence_volatility_high"]
+  },
+  "degraded": []
+}
+```
+
+**字段语义（唯一口径，前端与后端不得各自推导）**
+
+| 字段 | 类型 | 定义 |
+|---|---|---|
+| `days[]` | array | 区间内**每一天**一条，按日期升序；无数据的日期指标为 `null` 或 0 |
+| `interval_days` | object | 对象**当前**频率配置 `{checkin, report}`，供前端解释行为期望与逾期口径 |
+| `days[].review` | object \| null | `reviews.window_end == date` 的复盘（唯一约束保证至多一条）；无则 `null`。兼容历史数据中 `window_end` 为完整 ISO 时间戳的写法：按本地日期部分匹配；同日出现多条时优先精确 `YYYY-MM-DD` 行 |
+| `days[].review.color` | enum | 五色 `green/blue/yellow/orange/red`，与 `reviews.final_color` 一致 |
+| `days[].review.rules_fired` | string[] | 原样返回 `reviews.rules_fired`；前端渲染色块时必须同屏展示并给证据入口（ui@1.2 §5.2） |
+| `days[].analysis_risk_level` | enum \| null | 当日 `analysis_status ∈ {done,degraded}` 的会话中 `overall.risk_level` 的最高档，序 `none < watch < elevated < high < crisis`；无则 `null`（pending/failed 不参与，避免残留 JSON 抬档） |
+| `days[].sessions` | object | 当日会话计数：`total` 全部、`checkin` / `report` 按 `kind`、`analyzed` 为 `analysis_status ∈ {done,degraded}`、`failed` 为 `analysis_status=failed` |
+| `days[].text_valence` / `text_signal` | object | 仅统计 `kind=report` 且 `analysis_status ∈ {done,degraded}` 且 `analysis_json` 可解析的会话；`mean` 算术均值，`std` 样本标准差，**`count < 2` 时 `std=null`**；`count=0` 时 `mean=null`；`count` 为该项**各自**可用数值个数 |
+| `days[].consistency.degraded` | int | 当日 `analysis_status=degraded` 或 `analysis_json.degraded=true` 的会话数 |
+| `days[].consistency.low` | int | 当日 `analysis_json.consistency=low` 的会话数 |
+| `days[].consistency.conflict` | int | 当日 `analysis_json.consistency_basis.conflict=true` 的会话数 |
+| `days[].behavior.<kind>.expected` | bool | 该自然日是否落在频率周期内，按**对象当前** `interval_days` 从最近一次完成日回溯计算 |
+| `days[].behavior.<kind>.completed` | bool | 当日存在该 `kind` 且 `status=captured` 的会话 |
+| `days[].behavior.<kind>.overdue` | bool | `expected && !completed`；**历史回溯值，与 §7.6/§7.11 的实时逾期不同** |
+| `scatter_points[]` | array | 每次 `kind=report` 且 `analysis_status ∈ {done,degraded}` 的会话一条，按 `captured_at` 升序 |
+| `scatter_points[].valence` | number | `overall.text_valence`，范围 `[-1, 1]` |
+| `scatter_points[].signal` | number | `overall.text_signal`，范围 `[0, 100]` |
+| `scatter_points[].arousal` | number \| null | `channels.emotion.output.arousal`，范围 `[0, 1]`；通道不可用时 `null` |
+| `scatter_points[].emotion_label` | string \| null | `channels.emotion.output.label` |
+| `scatter_points[].review_color` / `review_rules` / `review_id` | — | 该会话 `captured_at` 所在自然日的复盘五色、规则与 id；无复盘时分别为 `null` / `[]` / `null`（前端**不得**为此类点着色） |
+| `summary.analyzed_count` | int | `scatter_points` 数量 |
+| `summary.avg_valence` / `avg_signal` | number \| null | 全部散点的算术均值；无点时为 `null` |
+| `summary.valence_std` / `signal_std` | number \| null | 全部散点的样本标准差；`analyzed_count < 2` 时为 `null` |
+| `summary.coverage_rate` | number | 区间内应有采集日的完成率：签到与汇报两类会话的 `expected` 日次合并为分母、`completed` 日次合并为分子，结果保留 4 位小数；分母为 0 时为 `0` |
+| `summary.quadrants` | object | q1=效价≥0&信号≥50；q2=效价<0&信号≥50；q3=效价<0&信号<50；q4=效价≥0&信号<50 |
+| `summary.signals` | string[] | 见下方枚举，去重、固定顺序；**只回机器码，不回中文文案** |
+| `degraded` | string[] | 固定 `[]`（与具体会话无关的聚合接口） |
+
+**`summary.signals` 枚举（只增不改）**
+
+| 码 | 含义（前端据此映射中性文案） |
+|---|---|
+| `insufficient_data` | 有效分析点 < 3 |
+| `low_arousal_negative` | 均值效价 < 0 且均值信号 < 35 |
+| `high_arousal_negative` | 均值效价 < 0 且均值信号 ≥ 70 |
+| `persistent_low_valence` | 至少 3 个点且全部效价 < -0.3 |
+| `valence_volatility_high` | `valence_std ≥ 0.35` 且有效点 ≥ 3 |
+| `signal_escalating` | 后 3 点均值 − 前 3 点均值 ≥ 15 且点数 ≥ 6 |
+| `frequent_low_consistency` | `low` 合计 ≥ 3 或占已分析会话 ≥ 40% |
+| `frequent_capture_degraded` | `degraded` 合计 ≥ 3 |
+| `behavior_overdue_frequent` | 区间内 `overdue` 日数 ≥ 3 |
+
+> 上述阈值与象限分界为**契约常量**，标注「待标定」，后续统一迁入阈值配置；变更需版本化。
+
+**明确不做**
+
+1. 不返回转写原文、`transcript_path`、`audio_path`、影像或 `face_path`；
+2. 不做跨对象聚合、排名或对比字段；
+3. 不产生处置动作，不写业务表（只读），不写 `audit_logs`（不含个体敏感原文）；
+4. 计算失败的单条 `analysis_json` 跳过该会话并在日志记录 `session_id`，不得使整个请求失败，也不得把异常原文写进响应。
+
 ## 8. 前端联调 mock
 
 后端未就绪时，前端使用 `web/src/mock/` 下的固定响应：
@@ -958,6 +1110,7 @@ query：`page`（默认 1）、`page_size`（默认 20，最大 100）。对象�
 | `review.json` | `/api/admin/reviews*` |
 | `ticket.json` | `/api/admin/tickets*` |
 | `dashboard.json` | `/api/admin/dashboard` |
+| `trend.json` | `/api/admin/subjects/{id}/trends` |
 
 mock 数据必须与本节示例字段完全一致，不得增删字段。
 
@@ -979,3 +1132,4 @@ mock 数据必须与本节示例字段完全一致，不得增删字段。
 | 1.5（实现补记） | 2026-11-24 | `analyze` 正式接入分析与五色分级（`2003`、幂等、`audit_logs(session.analyze)`）；新增 reviews（POST / GET 详情）、tickets（列表 / 详情 / 流转）、dashboard 契约；复盘窗口统一 `YYYY-MM-DD`；0 可用会话 → `1005 no_session_in_window`；consent 单项授权不可采集（`consent_incomplete`）；60s 频控仍延期 |
 | 1.5（实现补记·二） | 2026-11-24 | 双模块：`POST /api/sessions` 增 `kind`；analyze 按 kind 分流；新增 `GET /api/user/tasks`、`PATCH /api/admin/subjects/{id}/frequency`；管理端读取时惰性幂等生成逾期 P0 复核任务；`retention_days` 可选缺省 180 |
 | 1.5（实现补记·四） | 2026-11-25 | 思想汇报同步脚手架：新增 `sensevoice_syncs` 表（db@1.5 §7）与三个管理端端点（§7.15–7.17）；`SENSEVOICE_SYNC_ENABLED` 默认关闭；新增业务码 `2004` / `5001`；读取转写写 `sensitive.view`，同步成功写 `sensevoice.sync` |
+| 1.5（实现补记·五） | 2026-11-25 | 新增 `GET /api/admin/subjects/{subject_id}/trends`（§7.18）：任意日期区间多维聚合（日五色、分析最高风险档、文本效价/信号均值与标准差、一致性告警、行为依从性、散点）；缺省近 14 天、上限 366 天；只回 `signals` 机器码不回中文结论；只读不落库、不含敏感原文；保留 dashboard / `trend_7d` 兼容 |

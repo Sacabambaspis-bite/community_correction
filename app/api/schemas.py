@@ -249,6 +249,108 @@ class DashboardOut(BaseModel):
     overdue: dict[str, bool]
 
 
+# ---- 对象心理状态趋势（api@1.5 §7.18）----
+
+
+class TrendIntervalDaysOut(BaseModel):
+    checkin: int
+    report: int
+
+
+class TrendReviewOut(BaseModel):
+    color: str
+    review_id: str
+    rules_fired: list[str] = Field(default_factory=list)
+    consistency: str
+    manual_review: bool
+    evidence_available: bool
+
+
+class TrendSessionCountsOut(BaseModel):
+    total: int
+    checkin: int
+    report: int
+    analyzed: int
+    failed: int
+
+
+class TrendStatOut(BaseModel):
+    mean: Optional[float] = None
+    std: Optional[float] = None
+    count: int
+
+
+class TrendConsistencyOut(BaseModel):
+    degraded: int
+    low: int
+    conflict: int
+
+
+class TrendBehaviorKindOut(BaseModel):
+    expected: bool
+    completed: bool
+    overdue: bool
+
+
+class TrendBehaviorOut(BaseModel):
+    checkin: TrendBehaviorKindOut
+    report: TrendBehaviorKindOut
+
+
+class TrendDayOut(BaseModel):
+    date: str
+    review: Optional[TrendReviewOut] = None
+    analysis_risk_level: Optional[str] = None
+    sessions: TrendSessionCountsOut
+    text_valence: TrendStatOut
+    text_signal: TrendStatOut
+    consistency: TrendConsistencyOut
+    behavior: TrendBehaviorOut
+
+
+class TrendScatterPointOut(BaseModel):
+    date: str
+    session_id: str
+    captured_at: str
+    kind: str
+    valence: float
+    signal: float
+    arousal: Optional[float] = None
+    emotion_label: Optional[str] = None
+    review_color: Optional[str] = None
+    review_rules: list[str] = Field(default_factory=list)
+    review_id: Optional[str] = None
+
+
+class TrendQuadrantsOut(BaseModel):
+    q1: int
+    q2: int
+    q3: int
+    q4: int
+
+
+class TrendSummaryOut(BaseModel):
+    analyzed_count: int
+    avg_valence: Optional[float] = None
+    avg_signal: Optional[float] = None
+    valence_std: Optional[float] = None
+    signal_std: Optional[float] = None
+    coverage_rate: float
+    quadrants: TrendQuadrantsOut
+    signals: list[str] = Field(default_factory=list)
+
+
+class SubjectTrendsOut(BaseModel):
+    subject_id: str
+    start_date: str
+    end_date: str
+    interval_days: TrendIntervalDaysOut
+    days: list[TrendDayOut] = Field(default_factory=list)
+    scatter_points: list[TrendScatterPointOut] = Field(default_factory=list)
+    summary: TrendSummaryOut
+    degraded: list[str] = Field(default_factory=list)
+
+
 # ---- 思想汇报同步（api@1.5 §7.15-§7.17 / db@1.5 §7）----
 
 

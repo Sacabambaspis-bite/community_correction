@@ -23,6 +23,12 @@ from app.analysis.sensevoice_sync import (
     sync_configured,
     sync_report,
 )
+from app.api.aggregation import (
+    TrendRangeError,
+    build_trends,
+    resolve_date_range,
+    to_local_date,
+)
 from app.api.deps import get_db, require_admin
 from app.api.errors import (
     AI_UNAVAILABLE,
@@ -58,6 +64,7 @@ from app.api.schemas import (
     SubjectFrequencyRequest,
     SubjectListItem,
     SubjectListOut,
+    SubjectTrendsOut,
     TicketDetailOut,
     TicketListItemOut,
     TicketListOut,
@@ -730,6 +737,90 @@ def dashboard(
             overdue={kind: state["overdue"] for kind, state in states.items()},
         ).model_dump()
     )
+
+
+# ---- 对象心理状态趋势（api.md §7.18）----
+
+
+def _trend_review_records(reviews: list[Review]) -> list[dict]:
+    """把复盘 ORM 行转成聚合所需的只读快照（不含证据原文）。"""
+    return [
+        {
+            "review_id": review.id,
+            "window_end": review.window_end,
+            "created_at": review.created_at,
+            "color": review.final_color,
+            "rules_fired": _load_rules(review.rules_fired),
+            "consistency": review.consistency,
+            "manual_review": bool(review.manual_review),
+            "evidence_available": bool(_load_rules(review.evidence_json)),
+        }
+        for review in reviews
+    ]
+
+
+@router.get("/subjects/{subject_id}/trends")
+def get_subject_trends(
+    subject_id: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    _role: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    today = datetime.now().astimezone().date()
+    try:
+        start, end = resolve_date_range(start_date, end_date, today)
+    except TrendRangeError as exc:
+        raise BizError(INVALID_REQUEST, exc.reason) from None
+
+    subject = db.get(Subject, subject_id)
+    if subject is None:
+        raise BizError(NOT_FOUND, "not_found")
+
+    # 一次取该对象全部带捕获时间的会话：区间聚合与行为锚点都在 Python 内完成，避免 N+1。
+    sessions = db.scalars(
+        select(CaptureSession).where(
+            CaptureSession.subject_id == subject_id,
+            CaptureSession.captured_at.is_not(None),
+        )
+    ).all()
+    anchors: dict[str, Optional[date]] = {"checkin": None, "report": None}
+    session_records = []
+    for session in sessions:
+        captured_day = to_local_date(session.captured_at)
+        if session.status == "captured" and captured_day is not None:
+            if captured_day <= end:
+                current = anchors.get(session.kind)
+                if current is None or captured_day > current:
+                    anchors[session.kind] = captured_day
+        session_records.append(
+            {
+                "session_id": session.id,
+                "kind": session.kind,
+                "status": session.status,
+                "analysis_status": session.analysis_status,
+                "captured_at": session.captured_at,
+                "analysis_json": session.analysis_json,
+            }
+        )
+
+    reviews = db.scalars(
+        select(Review).where(Review.subject_id == subject_id)
+    ).all()
+
+    data = build_trends(
+        subject_id=subject.id,
+        start=start,
+        end=end,
+        interval_days={
+            "checkin": subject.checkin_interval_days,
+            "report": subject.report_interval_days,
+        },
+        sessions=session_records,
+        reviews=_trend_review_records(list(reviews)),
+        behavior_anchors=anchors,
+    )
+    return envelope(data=SubjectTrendsOut(**data).model_dump())
 
 
 # ---- 思想汇报同步（api.md §7.15 / §7.16 / §7.17）----
