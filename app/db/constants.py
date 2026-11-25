@@ -17,6 +17,7 @@ AUDIT_ACTIONS: tuple[str, ...] = (
     "review.create",
     "frequency.update",
     "sensevoice.sync",
+    "ai_assist.chat",
 )
 
 #: `review_tickets.suggested_method` 的合法取值（db.md §5.2）。

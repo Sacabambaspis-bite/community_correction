@@ -387,3 +387,23 @@ class SensevoiceSyncDetailOut(SensevoiceSyncItemOut):
     transcript_language: Optional[str] = None
     emotion: dict = Field(default_factory=dict)
     updated_at: str
+
+
+# ---- AI 援助（api@1.5 §7.19-§7.20）----
+
+
+class AiAssistStatusOut(BaseModel):
+    enabled: bool
+    web_search: bool
+    model: Optional[str] = None
+    notice: Optional[str] = None
+
+
+class AiChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=2000)
+
+
+class AiChatRequest(BaseModel):
+    subject_id: str = Field(..., min_length=1, max_length=64)
+    messages: list[AiChatMessage] = Field(..., min_length=1, max_length=12)
