@@ -10,18 +10,34 @@ Set-Location -Path $PSScriptRoot
 Write-Host ""
 Write-Host "=== Community Correction - Backend Startup ===" -ForegroundColor Cyan
 
-# Step 1: inject environment vars (current process only)
+# Step 1: load env vars from local .env (gitignored, no python-dotenv)
 Write-Host ""
-Write-Host "[1/4] Injecting environment variables..." -ForegroundColor Gray
+Write-Host "[1/4] Loading environment variables from .env..." -ForegroundColor Gray
 
-$env:SENSEVOICE_API_URL = "http://8.133.237.222:8000/recognize"
-$env:SENSEVOICE_API_KEY = "jrIDYIV1cZKEj4wLqySenGo25AtLxS0XTORyGffyHZU"
+$envFile = Join-Path $PSScriptRoot ".env"
+if (Test-Path $envFile) {
+    Get-Content $envFile -Encoding UTF8 | ForEach-Object {
+        $line = $_.Trim()
+        if ($line -and -not $line.StartsWith("#") -and $line.Contains("=")) {
+            $idx = $line.IndexOf("=")
+            $key = $line.Substring(0, $idx).Trim()
+            $value = $line.Substring($idx + 1).Trim().Trim('"').Trim("'")
+            if ($key -and -not [Environment]::GetEnvironmentVariable($key)) {
+                Set-Item -Path "Env:$key" -Value $value
+            }
+        }
+    }
+} else {
+    Write-Host "  WARNING: .env not found; ASR / AI providers may be unavailable" -ForegroundColor Yellow
+}
+
+$env:APP_ENV = "development"
 # CAPTURE_FAKE intentionally NOT set -> real microphone capture
 # USER_TOKEN / ADMIN_TOKEN intentionally NOT set -> use backend demo values
-$env:APP_ENV = "development"
 
-Write-Host "  SENSEVOICE_API_URL = $env:SENSEVOICE_API_URL"
-Write-Host "  SENSEVOICE_API_KEY  = (set, hidden)"
+Write-Host "  SENSEVOICE_API_URL = $(if ($env:SENSEVOICE_API_URL) { $env:SENSEVOICE_API_URL } else { '(MISSING)' })"
+Write-Host "  SENSEVOICE_API_KEY  = $(if ($env:SENSEVOICE_API_KEY) { '(set, hidden)' } else { '(MISSING)' })"
+Write-Host "  DEEPSEEK_API_KEY    = $(if ($env:DEEPSEEK_API_KEY) { '(set, hidden)' } else { '(MISSING)' })"
 Write-Host "  CAPTURE_FAKE        = (not set - real capture)"
 Write-Host "  APP_ENV             = $env:APP_ENV"
 
