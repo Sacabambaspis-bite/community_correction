@@ -262,6 +262,7 @@ pending ──confirm──> confirmed ──(自动)──> closed
 | `review.create` | 复盘创建 |
 | `frequency.update` | 管理端修改对象签到/汇报频率（2026-11-24 新增） |
 | `sensevoice.sync` | 管理端触发思想汇报同步（2026-11-25 新增） |
+| `ai_assist.chat` | 用户端发起 AI 援助对话；仅记录元数据，严禁写入聊天内容（2026-11-25 新增） |
 
 `detail_json` 示例（`sensitive.view`）：
 

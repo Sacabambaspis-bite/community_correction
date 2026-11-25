@@ -71,6 +71,16 @@
 > 3. 移除星期行标签与周列结构；无障碍组标签更新为「按日期从左到右排列」；图注同步说明折行规则。
 > 4. 目标：14 天数据在常见桌面宽度下一行完整可见；窄屏按行折行（约 2–3 行）展示，避免纵向长滚动。
 
+> **v1.2 实现补记 14（2026-11-25，新增页面）**：AI 援助由占位页升级为可用的独立对话页 `/ai-aid`。
+>
+> 1. **入口**：模块选择页「AI援助」卡片直达 `/ai-aid`；`/pending?feature=ai-aid` 重定向至 `/ai-aid`，`/pending` 仅保留「教育学习」占位。路由需 `RequireUser`。
+> 2. **页面结构**：标题与范围说明（心理援助、法律援助）→ 未开通/降级提示区 → 消息列表 → 输入区（多行、2000 字计数、发送/停止）。空态提供 3 条引导示例，点击即填入输入框。
+> 3. **流式渲染**：解析 SSE 的 `meta` / `delta` / `citation` / `notice` / `done` / `error`；`delta` 逐字追加；仅当用户接近底部时自动滚动；发送中禁用重复提交，提供「停止」；离开页面或点击停止立即 `abort`。
+> 4. **合规展示**：每条 AI 消息下方固定展示「目前测试版本的回答基于公开网络信息，仅供参考，不构成专业建议」；页头固定展示「你的问题会发送至第三方模型服务用于生成回答，请勿输入身份证号、住址等敏感信息」；收到 `notice(web_search_unavailable)` 时在该条消息内追加「本次回答未启用联网搜索」。引用来源以纯文本链接列出，`target="_blank"` + `rel="noopener noreferrer"`，无来源则不显示。
+> 5. **状态**：`status.enabled=false` 时输入区禁用，展示中性提示「智能援助暂未开通，请联系工作人员」；流内 `error` 以气泡级错误展示并提供重试；`1004` 返回对象列表入口。
+> 6. **隐私**：消息仅存内存，禁止写入 `localStorage` / `IndexedDB` / 后端业务表；页面不显示 `subject_id`；提供「清空对话」，刷新即清空。不提供文件/图片上传与语音输入。
+> 7. **渲染安全**：AI 文本按纯文本渲染（保留换行），不注入 HTML，不引入 Markdown 渲染库；禁止展示风险色码、评分或诊断结论。
+
 ---
 
 ## 1. 技术约定
@@ -95,7 +105,8 @@
 | user | `/capture` | 模块选择页（签到 / 思想汇报） | `web/src/user/Capture/` |
 | user | `/capture/checkin` | 刷脸签到子页（face_only） | `web/src/user/Checkin/` |
 | user | `/capture/report` | 思想汇报子页（face+audio，原采集引导页） | `web/src/user/Capture/` |
-| user | `/pending` | 功能待开发提示页（`?feature=ai-aid\|education`） | `web/src/user/ComingSoon/` |
+| user | `/pending` | 功能待开发提示页（仅 `?feature=education`） | `web/src/user/ComingSoon/` |
+| user | `/ai-aid` | AI 援助对话页（心理援助 / 法律援助，SSE 流式） | `web/src/user/AiAssist/` |
 | user | `/feedback/:sessionId` | 结果反馈页 | `web/src/user/Feedback/` |
 | admin | `/admin/subjects` | 对象列表 | `web/src/admin/Subjects/` |
 | admin | `/admin/subjects/:subjectId` | 对象详情 + 记录检索 | `web/src/admin/SubjectDetail/` |
@@ -176,6 +187,8 @@
 |---|---|
 | 签到卡片 | 「刷脸签到」：显示 `checkin.interval_days`（如「每 1 天一次」）、`last_completed_at`；`overdue=true` 时中性提示「已逾期，请尽快完成」 |
 | 汇报卡片 | 「录音思想汇报」：显示 `report.interval_days`、`last_completed_at` 与同款逾期提示 |
+| AI援助卡片 | 「AI援助」：直达 `/ai-aid`，展示「心理援助 · 法律援助」；不依赖 `tasks` 接口 |
+| 教育学习卡片 | 仍跳 `/pending?feature=education` 占位页 |
 | 数据来源 | `GET /api/user/tasks`；未授权时仍由路由守卫跳 `/consent` |
 
 签到子页 `/capture/checkin`：
@@ -187,6 +200,22 @@
 | 主按钮 | `开始签到` → `POST /api/sessions`（`kind=checkin`）→ 轮询 → 完成后 `POST /api/sessions/{id}/analyze` → 跳 `/feedback/:sessionId` |
 
 思想汇报子页 `/capture/report` 沿用 §3.2 全部约定，`POST /api/sessions` 携带 `kind=report`。
+
+### 3.5 AI 援助页 `/ai-aid`（2026-11-25 新增）
+
+| 区块 | 内容 |
+|---|---|
+| 页头 | 标题「AI援助」+ 说明「提供心理援助与法律援助的一般性信息，不替代医生、律师或工作人员」+ 固定第三方处理提示「你的问题会发送至第三方模型服务用于生成回答，请勿输入身份证号、住址等敏感信息」 |
+| 状态提示 | `GET /api/user/ai-assist/status`：未开通时禁用输入并显示中性提示；联网不可用时在消息内提示 |
+| 消息列表 | 用户消息右对齐、AI 消息左对齐；AI 正文纯文本渲染（保留换行）；流式期间显示光标态；每条 AI 消息下固定免责声明 |
+| 引用来源 | 仅当收到 `citation` 时展示，标题 + 域名；链接 `target="_blank" rel="noopener noreferrer"` |
+| 输入区 | 多行输入，2000 字上限并显示计数；`Enter` 发送、`Shift+Enter` 换行；发送中显示「停止」 |
+| 空态 | 3 条引导示例（如「最近压力很大，怎么调节？」「法律援助怎么申请？」），点击填入输入框 |
+| 操作 | 「清空对话」仅清内存；不保存历史、不写入 `localStorage` / `IndexedDB` |
+
+请求与事件协议见 api.md §7.19–§7.20。前端每轮最多携带最近 12 条消息，服务端无状态。
+
+**禁止**：展示风险色码/评分/诊断结论；保存聊天记录；文件、图片或语音上传；HTML/Markdown 注入；在 UI 或日志中显示 `subject_id`、API Key、上游错误原文。
 
 ## 4. 管理端页面
 

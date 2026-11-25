@@ -165,6 +165,8 @@ Authorization: Bearer <token>
 | `PUT` | `/api/user/consent` | 已实现 | 提交同意（请求体 `face` / `audio` 两个布尔；用户端已合并为单次勾选，见 ui.md 补记 7） |
 | `POST` | `/api/user/consent/revoke` | 已实现 | 撤回同意 |
 | `GET` | `/api/user/sessions/{session_id}/feedback` | 已实现 | 中性结果反馈（不含色码） |
+| `GET` | `/api/user/ai-assist/status` | 已实现 | AI 援助可用状态（不暴露 Key；见 §7.19） |
+| `POST` | `/api/user/ai-assist/chat` | 已实现 | AI 援助流式对话（SSE；无状态、不落业务表；见 §7.20） |
 
 ### 5.4 管理端（`/api/admin/*`，需 `staff`）
 
@@ -199,6 +201,7 @@ Authorization: Bearer <token>
 | `GET /api/admin/sessions/{id}/transcript` | 无 | 必须写留痕 |
 | `GET /api/admin/sensevoice-syncs/{id}` | 无 | 含转写原文，必须写留痕 |
 | `GET /api/admin/subjects/{id}/trends` | 转写原文、`transcript_path`、`audio_path`、影像、`face_path` | 仅返回聚合指标，不含个体敏感原文 |
+| `/api/user/ai-assist/*` | 用户消息原话、AI 回复原文、上游响应体、`DEEPSEEK_API_KEY` | 对话不落库、不写日志；`audit_logs.detail_json` 仅记录模型、轮次、状态等元数据 |
 | 全局日志 | 音频内容、转写原文、面部图 base64、`audio_path` 绝对路径 | 红线 |
 
 `feedback` 只允许返回：`status`、`summary_text`（中性表述）、`suggestion`（枚举）、`next_action`。
@@ -1099,6 +1102,92 @@ curl "http://localhost:8000/api/admin/subjects/3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2
 3. 不产生处置动作，不写业务表（只读），不写 `audit_logs`（不含个体敏感原文）；
 4. 计算失败的单条 `analysis_json` 跳过该会话并在日志记录 `session_id`，不得使整个请求失败，也不得把异常原文写进响应。
 
+### 7.19 `GET /api/user/ai-assist/status`
+
+查询参数 `subject_id`；需 `subject` 角色；对象不存在 `1004`。响应 `code=0`：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "enabled": true,
+    "web_search": true,
+    "model": "deepseek-flash",
+    "notice": null
+  },
+  "degraded": [],
+  "request_id": "…"
+}
+```
+
+- 未配置 `DEEPSEEK_API_KEY`：`enabled=false`、`web_search=false`、`model=null`，`notice="智能援助暂未开通，请联系工作人员"`，HTTP 200、`code=0`，**不返回 500**。
+- `web_search` 表示本次部署是否声明了联网工具；`notice` 为空时为 `null`。
+- 禁止返回 Key、Base URL 凭据或上游错误原文。
+
+### 7.20 `POST /api/user/ai-assist/chat`（SSE）
+
+需 `subject` 角色。请求体：
+
+```json
+{
+  "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
+  "messages": [
+    { "role": "user", "content": "最近总是睡不着，心里很慌" },
+    { "role": "assistant", "content": "……" },
+    { "role": "user", "content": "我该怎么办？" }
+  ]
+}
+```
+
+| 字段 | 规则 |
+|---|---|
+| `subject_id` | 必填，对象必须存在，否则 `1004` |
+| `messages` | 1–12 条；仅 `user` / `assistant`；最后一条必须为 `user` |
+| 单条 `content` | 1–2000 字符 |
+| 总字符数 | ≤ 12000 |
+
+校验失败在开流前返回 JSON 信封（`1001` / `1004`）。通过后返回 `Content-Type: text/event-stream; charset=utf-8`，响应头含 `Cache-Control: no-cache, no-transform`、`X-Accel-Buffering: no`；每 15s 发送 `: keep-alive`。
+
+SSE 事件（`data` 均为 JSON）：
+
+| event | 载荷 | 说明 |
+|---|---|---|
+| `meta` | `{request_id, model, web_search, disclaimer}` | 首帧；`disclaimer` 为固定合规文案 |
+| `delta` | `{text}` | 增量正文，前端逐字拼接 |
+| `citation` | `{index, title, url}` | 可选；仅透传上游真实来源，**禁止编造** |
+| `notice` | `{code, message}` | 降级提示，如 `web_search_unavailable` |
+| `done` | `{finish_reason, degraded, request_id}` | 正常结束 |
+| `error` | `{code, message, request_id}` | 流内错误；HTTP 仍为 200 |
+
+上游调用（OpenAI 兼容 `POST {DEEPSEEK_BASE_URL}/chat/completions`，`Authorization: Bearer $DEEPSEEK_API_KEY`）：
+
+```json
+{
+  "model": "deepseek-flash",
+  "stream": true,
+  "thinking": { "type": "disabled" },
+  "messages": [{ "role": "system", "content": "……固定 System Prompt……" }, { "role": "user", "content": "……" }],
+  "tools": [{ "type": "deepseek_web_search" }],
+  "temperature": 0.3,
+  "max_tokens": 800
+}
+```
+
+- **禁止**设置 `tool_choice`（命名内置工具会 400）；是否搜索由模型决定。
+- System Prompt 固定：仅回答心理援助与法律援助；不做诊断/开药/定罪/再犯预测；自伤伤人等紧急情形引导联系工作人员、120/110；提醒勿输入身份证号、住址、案件细节；超范围明确拒绝并引导工作人员；引用网络信息须给真实来源；结尾附「仅供参考，不构成专业建议」。
+- 上游报错（含不支持工具声明、400/401/403/429/5xx、超时）：**自动降级为不带 `tools` 的普通对话**并发送 `notice(code="web_search_unavailable", message="本次回答未启用联网搜索")`；仍失败则发 `error`，不得 500，不得返回上游响应体。
+- 未配置 Key：直接 `notice` + `done`，不请求上游。
+- 若上游返回需要客户端执行的 `tool_calls`：不执行、不伪造结果，按降级处理。
+
+**隐私与审计**
+
+1. 不新增数据表、不写 SQLite 业务表、不写文件、不接收 `conversation_id`；历史由前端每轮携带。
+2. 每次 POST 结束（含成功、降级、错误、客户端断连）写一条 `audit_logs`：`actor_type="subject"`、`actor_id=subject_id`、`action="ai_assist.chat"`、`target_type="subject"`、`target_id=subject_id`。
+3. `detail_json` 仅允许 `{model, web_search, turns, status, degraded}`；`status ∈ ok|degraded|error|aborted|disabled`；**严禁**写入用户原话、AI 回复、消息摘要、prompt 或上游响应体。
+4. 日志仅记录 `request_id`、端点、状态、上游 HTTP 状态码与耗时；不记录请求体、响应体与异常原文。
+5. 流内审计使用新的 session 工厂上下文，不复用请求级 Session；审计失败不得中断已发送的流。
+
 ## 8. 前端联调 mock
 
 后端未就绪时，前端使用 `web/src/mock/` 下的固定响应：
@@ -1111,6 +1200,7 @@ curl "http://localhost:8000/api/admin/subjects/3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2
 | `ticket.json` | `/api/admin/tickets*` |
 | `dashboard.json` | `/api/admin/dashboard` |
 | `trend.json` | `/api/admin/subjects/{id}/trends` |
+| mock 内联（不落文件） | `/api/user/ai-assist/status` 返回 `enabled=false` + 中性提示；`/api/user/ai-assist/chat` 返回 `notice` + `done`，不产生模拟回答 |
 
 mock 数据必须与本节示例字段完全一致，不得增删字段。
 
@@ -1133,3 +1223,4 @@ mock 数据必须与本节示例字段完全一致，不得增删字段。
 | 1.5（实现补记·二） | 2026-11-24 | 双模块：`POST /api/sessions` 增 `kind`；analyze 按 kind 分流；新增 `GET /api/user/tasks`、`PATCH /api/admin/subjects/{id}/frequency`；管理端读取时惰性幂等生成逾期 P0 复核任务；`retention_days` 可选缺省 180 |
 | 1.5（实现补记·四） | 2026-11-25 | 思想汇报同步脚手架：新增 `sensevoice_syncs` 表（db@1.5 §7）与三个管理端端点（§7.15–7.17）；`SENSEVOICE_SYNC_ENABLED` 默认关闭；新增业务码 `2004` / `5001`；读取转写写 `sensitive.view`，同步成功写 `sensevoice.sync` |
 | 1.5（实现补记·五） | 2026-11-25 | 新增 `GET /api/admin/subjects/{subject_id}/trends`（§7.18）：任意日期区间多维聚合（日五色、分析最高风险档、文本效价/信号均值与标准差、一致性告警、行为依从性、散点）；缺省近 14 天、上限 366 天；只回 `signals` 机器码不回中文结论；只读不落库、不含敏感原文；保留 dashboard / `trend_7d` 兼容 |
+| 1.5（实现补记·六） | 2026-11-25 | 新增 AI 援助 `GET /api/user/ai-assist/status`、`POST /api/user/ai-assist/chat`（§7.19–7.20）：DeepSeek `deepseek-flash` + `thinking.type=disabled` + `tools:[{"type":"deepseek_web_search"}]`，不设 `tool_choice`；SSE 流式；无 Key 返回中性提示不报 500；不支持工具时自动降级并提示「本次回答未启用联网搜索」；对话不落业务表，仅写 `audit_logs(ai_assist.chat)` 元数据 |

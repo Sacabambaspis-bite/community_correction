@@ -146,6 +146,17 @@
 | 后续待办 | 常见桌面宽度可单行完整展示；窄屏按 2–3 行折行。若后续区间扩大到 30/90 天，可评估按月分组或固定高度滚动，避免行数过多 |
 | 备注 | 五色映射、无复盘中性灰、选中描边、键盘聚焦、详情面板、证据深链（`/admin/reviews/:reviewId`）与图例均未改变 |
 
+### 2.10 进度记录：P20 AI 援助接入 DeepSeek 联网搜索
+
+| 项 | 内容 |
+|---|---|
+| 完成时间 | 2026-11-25（Asia/Shanghai） |
+| 变更内容 | ① `api.md` 新增 §7.19（status）与 §7.20（chat SSE）、§5.3/§6/§8/变更记录；`db.md` §6.1 新增 `ai_assist.chat`；`ui.md` 新增补记 14 与 §3.5 AI 援助页<br>② 后端新增 `app/api/routers/ai_assist.py`：`deepseek-flash` + `thinking.type=disabled` + `tools:[{"type":"deepseek_web_search"}]`，**不设 `tool_choice`**；SSE `meta/delta/citation/notice/done/error`；无 Key 中性提示；工具不支持或上游失败自动降级为普通对话并提示「本次回答未启用联网搜索」；不建表、不存对话，仅写 `audit_logs(ai_assist.chat)` 元数据；`requirements.txt` 仅新增 `httpx`<br>③ 前端新增 `/ai-aid` 独立页（`AiAssistPage`）、SSE 解析（`aiAssist.ts`）与逐字渲染：2 条引导、2000 字计数、Enter 发送 / Shift+Enter 换行、停止/重试/清空、引用外链、每条 AI 消息固定免责声明、页头第三方处理提示；`/pending?feature=ai-aid` 重定向；`/capture` 卡片直达；无 `localStorage` / `sessionStorage` / `dangerouslySetInnerHTML` |
+| 完成状态 | 已完成。`pytest tests -q` → 317 passed（新增 16）；`npm run typecheck` / `npm run build` 通过；浏览器实测 `/ai-aid` 未开通态：标题与说明、中性提示、输入/发送禁用、无红色报错；`/pending?feature=ai-aid` 正确跳转；隐私审查无阻断项。2026-11-25 使用真实 Key 联调：`status` 返回 `enabled=true / web_search=true / model=deepseek-flash`，单轮 154 个 `delta`、正常 `done`、无降级；前端真实 API 模式端到端问答通过，回复下方免责声明正常，审计仅元数据 |
+| 影响范围 | `docs/contracts/{api,ui,db}.md`、`README.md`、`.env.example`；`app/api/routers/ai_assist.py`、`app/api/{main,schemas}.py`、`app/db/constants.py`、`requirements.txt`、`tests/test_api/test_ai_assist.py`；`web/src/user/AiAssist/*`、`web/src/api/{aiAssist.ts,types.ts,mock.ts}`、`web/src/App.tsx`、`CaptureTasksPage.tsx`、`ComingSoonPage.tsx`。未改其他业务模块 |
+| 后续待办 | 真实上游已验证（`deepseek_web_search` 声明被接受、无降级）；Key 当前仅注入后端进程内存，重启需重新注入，持久化建议由用户通过 `setx` 或密钥管理工具完成；建议补用户级限流、`subject_id` 与 token 绑定、撤回同意后的停用策略；mock 模式固定未开通，不生成模拟回答 |
+| 备注 | 对话不留存：不写 SQLite 业务表、文件与浏览器存储；审计仅 `{model, web_search, turns, status, degraded}`，日志不记录请求体/响应体/异常原文/Key |
+
 ## 3. 已完成功能模块与交付物
 
 | 对象 | 状态 | 标签 / 提交 |
@@ -192,6 +203,8 @@
 | 心理状态趋势并入「状态概览」，移除独立看板入口/容器 | 已实现（P18） | 本次提交 |
 | 四个图表封装为可折叠按钮，默认收起、独立展开/收起（`ChartCollapsible`） | 已实现（P18） | 本次提交 |
 | 五色热力图改为按日期从左到右、窄屏自动折行（移除周列矩阵与横向滚动） | 已实现（P19） | 本次提交 |
+| AI 援助 `/ai-aid`：DeepSeek `deepseek-flash` + `deepseek_web_search`，SSE 流式、降级提示、审计元数据 | 已实现（P20） | 本次提交 |
+| AI 援助对话零留存：不建表、不写业务表/文件/浏览器存储，仅 `audit_logs(ai_assist.chat)` | 已实现（P20） | 本次提交 |
 | 远程仓库 | `main` 与 `origin/main` 同步 | `origin/main` @ `4c38d5d` |
 | `scripts/seed_demo.py` 演示数据（含占位素材） | 已实现 | `0bb78b5` |
 | QA 核验 + M1–M4/L4/L8 修复 | 已完成 | `638245e`（报告）、`7732930`（修复） |
