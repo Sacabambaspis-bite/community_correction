@@ -12,7 +12,11 @@ def load_env_file(path: Path) -> None:
     """把 .env 中的键注入当前进程；已存在的非空环境变量优先，不覆盖。"""
     if not path.is_file():
         return
-    for line in path.read_text(encoding="utf-8-sig").splitlines():
+    # 用 utf-8 读取并手动剥离 BOM：避免导入 utf_8_sig 编解码器时写 .pyc 失败。
+    raw = path.read_text(encoding="utf-8")
+    if raw.startswith("\ufeff"):
+        raw = raw[1:]
+    for line in raw.splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
