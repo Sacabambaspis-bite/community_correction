@@ -1,6 +1,6 @@
 # 项目进度（PROGRESS）
 
-> 生成时间：2026-11-25 · 基准提交：`62f21c0`（含 P12–P14，`main` 与 `origin/main` 同步）· 工作区增量：P15 管理端本地化与术语统一 · 依据：`git log`、`git tag`、`pytest` 实测、[QA 报告](./reports/qa-2026-11-24.md)。
+> 生成时间：2026-11-26 · 基准提交：`7d6693c`（本轮文档同步提交前）· 工作区增量：P21 同步模块下线、P22 当前结果移除与文档收尾 · 依据：`git log`、`git tag`、`pytest` 实测（338 passed）、[QA 报告](./reports/qa-2026-11-24.md)。
 > 本文只记录仓库里可核实的事实；尚未实现或未定稿的内容标注「待确认」。
 
 ## 1. 项目定位与技术栈
@@ -17,7 +17,7 @@
 | 分级 | 五色纯函数规则 + 七日趋势 + 复核任务草案 | 已实现并接入 analyze / 复盘 / 复核任务接口（`c46536e`） |
 | Schema 校验 | jsonschema（Draft 2020-12 + FormatChecker） | 已引入，分析结果强制校验 |
 | 前端 | React + Vite（用户端 / 管理端同仓，按路由分区） | 用户端登录（含同意）+ 采集/反馈 + 管理端列表/详情/复核任务已实现（`601d33d`；P12 登录页；P14 对象详情档案、按日期媒体、状态概览；P15 全量中文化与术语统一） |
-| 测试 | pytest | 286 条全绿（capture 14 / db 21 / api 74 / analysis 69 / grading 108） |
+| 测试 | pytest | 338 条全绿（2026-11-26 实测；已删除 13 条同步测试，新增 4 条媒体分析/下线回归测试） |
 
 技术栈来源：[architecture.md](./architecture.md#L11-L21)；采集运行在后端宿主设备而非浏览器（[architecture.md](./architecture.md#L23-L31)）。
 
@@ -40,15 +40,18 @@
 | P10 双模块与手动录音 | 11-24 15:05–15:20 | ① SenseVoice ASR 真实接入（超时回退）② consent 一次性授权、去保存期限 ③ 签到/汇报双模块 + 逾期复核 ④ 思想汇报手动录音 | 见 §3 下表 | `fa5a0d7`、`8013d4e` |
 | P11 用户端入口调整 | 2026-11-24 16:05 | 同意后直达采集页；事项页新增「AI援助」「教育学习」入口与「功能待开发」占位页；文档同步 | `web/src/user/`、`docs/contracts/ui.md`、`README.md` | 见 §2.1 |
 | P12 登录页与同意合并 | 2026-11-25 | 新增 `/login`（用户名 / 密码 / 统一知情同意）；删除独立同意页与组件，旧 `/consent` 仅跳转；演示账号 `张三 / 123456`；守卫改为「登录 + 同意三要素」；默认演示对象改指 seed 的 S001 | `web/src/user/Login/`、`web/src/lib/auth.ts`、`web/src/lib/guards.tsx`、`web/src/App.tsx`、`docs/contracts/ui.md` | 见 §2.2 |
-| P13 思想汇报同步脚手架 | 2026-11-25 | 新增 `sensevoice_syncs` 表与迁移；新增同步/列表/详情三个管理端端点（功能开关默认关闭，失败整体回滚）；新增严格 SenseVoice 转写 + 情绪适配层（无 Mock 回退）；对象详情页新增「思想汇报同步」面板；13 条契约测试 | `app/analysis/sensevoice_sync.py`、`app/db/`、`app/api/`、`web/src/admin/SubjectDetail/`、`docs/contracts/{db,api,ui}.md` | 见 §2.3 |
+| P13 思想汇报同步脚手架 | 2026-11-25 | 新增 `sensevoice_syncs` 表与迁移；新增同步/列表/详情三个管理端端点（功能开关默认关闭，失败整体回滚）；新增严格 SenseVoice 转写 + 情绪适配层（无 Mock 回退）；对象详情页新增「思想汇报同步」面板；13 条契约测试（**P21 已整体下线**） | `app/analysis/sensevoice_sync.py`、`app/db/`、`app/api/`、`web/src/admin/SubjectDetail/`、`docs/contracts/{db,api,ui}.md` | 见 §2.3 |
 | P14 管理端对象详情增强 | 2026-11-25 | 列表姓名跳转详情；详情补基础档案（性别/年龄/身份证号等）；新增按日期查看打卡影像与思想汇报录音（在线预览/播放，敏感面板默认折叠）；状态看板整体合并进详情并下线独立入口 | `web/src/api/`、`web/src/mock/`、`web/src/admin/`、`web/src/App.tsx` | 见 §2.4 |
 | P15 管理端本地化与术语统一 | 2026-11-25 | ① 色码规则、触发规则、证据字段/阈值/取值全部中文化，未知项中性占位；② 移除对象名称下方 UUID；③ 「工单 / 建单」统一改称「复核任务 / 生成任务」，同步五份契约、README、PRD、分级说明与架构文档；④ 修复对象列表「状态 / 最近签到」与复核队列「对象 / 状态」等短文本换行 | `web/src/lib/ruleText.ts`、`web/src/admin/`、`web/src/components/common/ColorBadge.tsx`、`docs/contracts/`、`README.md` | 见 §2.5（工作区） |
 | P16 管理端媒体读取接入 | 2026-11-25 | 后端新增 `GET /api/admin/subjects/{id}/media`（按日返回打卡影像 URL、汇报音频 URL 与转写文本）与 `GET /api/admin/sessions/{id}/audio`（`audio/wav` + Range）；前端改为带鉴权拉 blob 渲染照片/音频并展示转写；读取转写写 `sensitive.view` 审计；10 条契约测试 | `app/api/routers/admin.py`、`web/src/lib/http.ts`、`web/src/api/`、`web/src/admin/SubjectDetail/`、`docs/contracts/api.md` | — |
 | P17 AI 援助启用与详情页交互收敛 | 2026-11-25 | ① 启动脚本注入 `DEEPSEEK_API_KEY`，AI 援助 `enabled=true` 并实测 SSE 出字；② 删除独立「敏感内容」栏目，留痕提示并入「打卡与思想汇报」；③ 移除「可用日期」文字列表，改为月历选择器（无记录日期置灰禁用）；④ 同步 `ui.md` 区块表与验收清单 | `_start_backend.py`、`start-backend.ps1`、`web/src/admin/SubjectDetail/`、`docs/contracts/ui.md` | — |
 | P18 当日多条记录浏览与时间线合并 | 2026-11-25 | ① `/media` 响应改为 `items[]`（当日全部 captured 会话，按采集时间升序），默认选中最新一条；② 详情区新增「上一条 / 下一条」切换与条数指示，逐条展示影像、录音、转写；③ 独立「会话时间线」改为栏目底部折叠区「全部采集记录（含失败）」；④ 转写审计改为单条汇总并带 `count`；后端 346 passed，前端构建通过 | `app/api/routers/admin.py`、`web/src/api/types.ts`、`web/src/api/mock.ts`、`web/src/admin/SubjectDetail/`、`tests/test_api/test_admin_media.py`、`docs/contracts/api.md`、`docs/contracts/ui.md` | — |
 | P19 情绪结果随录音展示 | 2026-11-25 | `/media` 每条记录的 `emotion` 取自 `analysis_json.channels.emotion`，与录音一一对应；管理端「录音与转写」卡片在转写下方展示「情绪识别：倾向（valence / arousal）· 模型」，降级结果标注「仅供参考」；补 1 条对齐测试（后端 13 passed） | `app/api/routers/admin.py`、`web/src/api/types.ts`、`web/src/api/mock.ts`、`web/src/admin/SubjectDetail/`、`tests/test_api/test_admin_media.py`、`docs/contracts/api.md` | — |
+| P20 AI 援助接入 DeepSeek 联网搜索 | 2026-11-25 | 用户端 `/ai-aid` 对话页、SSE 流式渲染、引用与降级提示；后端 `status` / `chat` 端点、会话级审计；对话不落业务表 | `app/api/routers/ai_assist.py`、`web/src/user/AiAid/`、`docs/contracts/api.md` | 见 §2.10 |
+| P21 思想汇报同屏分析与同步模块下线 | 2026-11-26 | ① 删除「思想汇报同步」前后端全链路（端点、模型、表、迁移、配置、测试、面板）；② `/media` 每条记录新增 `analysis`（face/emotion/psych）、`rules_fired`、`evidence`、`review_color`；③ 思想汇报展开区同屏展示三路分析与五色证据；④ 删除页面底部「记录检索」占位卡片；后端 338 passed、`npm run typecheck` / `build` 通过 | `app/api/routers/admin.py`、`app/db/`、`app/api/`、`web/src/api/`、`web/src/admin/SubjectDetail/`、`tests/test_api/test_admin_media.py`、`docs/contracts/{db,api,ui}.md` | 见 §2.11 |
+| P22 当前结果栏目移除与文档收尾 | 2026-11-26 | ① 删除管理端对象详情「当前结果」占位栏目及相关注释、页面描述与失效样式；② 清理 `PROGRESS.md` / `api.md` / `db.md` 中同步模块的过期启用说明与陈旧配置描述；③ README 功能特性、使用说明、迁移命令、测试数量与已知限制同步到 P21/P22 状态，并新增更新日志；④ 回归 338 passed、`typecheck` / `build` 通过，浏览器实测栏目消失且其他区块正常 | `README.md`、`docs/PROGRESS.md`、`docs/contracts/{api,db,ui}.md`、`web/src/admin/SubjectDetail/SubjectDetailPage.tsx`、`web/src/admin/README.md` | 见 §2.12 |
 
-**阶段结论**：P0–P10 已形成「采集 → 数据 → 分析 → 分级 → 复核任务 → 前端」的完整纵向切片并全部提交。P11–P14 已提交（用户端入口、登录页合并同意、思想汇报同步脚手架、管理端对象详情增强），P15、P16 已完成（管理端本地化与术语统一、媒体后端接入）。其中 P13 的同步能力因 SenseVoice 服务不可达与情绪接口协议未确认而**默认关闭**，不产生真实同步数据；P14 的媒体与档案字段仍为前端 mock 扩展，契约待补；P15 仅调整展示文案与样式，不改接口、状态机与流转规则。后端测试总数由 224 增至 286。
+**阶段结论**：P0–P10 已形成「采集 → 数据 → 分析 → 分级 → 复核任务 → 前端」的完整纵向切片并全部提交。P11–P22 已完成（用户端入口、登录页合并同意、管理端对象详情增强、媒体读取、AI 援助、同屏分析、同步模块下线、当前结果移除与文档收尾）。P13 的同步能力已在 P21 整体下线，`sensevoice_syncs` 表与旧端点不再存在；P14 的媒体随后端接口补齐转正，档案字段仍为前端 mock；P15 仅调整展示文案与样式，不改接口、状态机与流转规则。后端测试总数由 224 增至 338（删除 13 条同步测试、新增 4 条媒体分析/下线回归测试）。
 
 ### 2.1 进度记录：P11 用户端入口与跳转调整
 
@@ -72,17 +75,15 @@
 | 后续待办 | ① 生产环境接入真实认证（用户表 / 统一身份），移除前端演示账号与明文密码<br>② 如需查看已提交同意或在线撤回，可在登录页补充「同意状态」区块并调用既有 `GET/PUT /api/user/consent`、`POST /api/user/consent/revoke`<br>③ 真实后端联调需 `VITE_USE_MOCK=0` 且先执行 `python scripts/seed_demo.py`，否则默认演示对象不存在会提示 1004<br>④ 补充登录页的路由级自动化测试（当前依赖构建与人工浏览器验证） |
 | 备注 | 登录校验为**开发阶段演示账号**，密码会进入前端打包产物，不能视为真实鉴权；Mock 模式下同意状态写入 `localStorage` 以保证刷新后登录态连贯，真实模式以后端为准 |
 
-### 2.3 进度记录：P13 思想汇报同步脚手架
+### 2.3 进度记录：P13 思想汇报同步脚手架（已于 P21 下线）
 
 | 项 | 内容 |
 |---|---|
 | 完成时间 | 2026-11-25（Asia/Shanghai） |
-| 变更内容 | ① 契约新增 `db@1.5 §7 sensevoice_syncs`、`api@1.5 §7.15–7.17` 与业务码 `2004/5001`、`ui@1.2 补记 8`<br>② 新增 ORM `SensevoiceSync` 与迁移 `202611251200_add_sensevoice_syncs.py`（幂等，仅新增表与索引）<br>③ 新增严格同步适配层 `app/analysis/sensevoice_sync.py`：ASR + 情绪均失败即抛错，**绝不回退 Mock**；情绪响应防御式映射为 `emotion@1.0`<br>④ 新增 `POST /api/admin/subjects/{id}/sensevoice-sync`（单事务，失败整体回滚）、`GET .../sensevoice-syncs`、`GET /api/admin/sensevoice-syncs/{id}`（读取转写写 `sensitive.view` 留痕）<br>⑤ 对象详情页新增「思想汇报同步」面板：同步按钮、记录列表、按需展开完整报告，能力未启用时只显示中性提示<br>⑥ 新增 13 条契约测试 |
-| 完成状态 | 脚手架已完成；`pytest tests -q` 286 passed、`npm run build` 通过；真实库已执行迁移并确认表/索引存在；重启后实测列表返回 `code=0, total=0`、同步返回 `code=5001, message=sensevoice_sync_disabled` |
-| 开关与启用条件 | 环境变量 `SENSEVOICE_SYNC_ENABLED`（默认 `0`）控制；启用还需 `SENSEVOICE_API_URL`、`SENSEVOICE_API_KEY`、`SENSEVOICE_EMOTION_API_URL` 三项齐全。当前 `.env` 只有 ASR 地址与 Key，**缺情绪服务地址**；SenseVoice 服务 `8.133.237.222:8000` 连接失败/超时，因此保持关闭 |
-| 影响范围 | `app/analysis/sensevoice_sync.py`（新增）、`app/db/models.py`、`app/db/migrations/`、`app/api/{errors,schemas}.py`、`app/api/routers/admin.py`、`web/src/api/{admin,types,mock}.ts`、`web/src/lib/errorMessages.ts`、`web/src/admin/SubjectDetail/`、`tests/test_api/test_sensevoice_sync.py`、三份契约 |
-| 后续待办 | ① 待 SenseVoice 恢复并确认情绪接口协议后，配置 `SENSEVOICE_EMOTION_API_URL` 并设 `SENSEVOICE_SYNC_ENABLED=1`<br>② 张三需真实录制 ≥5 秒思想汇报（现有今日会话仅 2 秒且未保存音频；历史 seed 行引用的 `audio.wav` 不存在）<br>③ 启用前用真实音频跑一次同步，核对转写全文、情绪类型/置信度/关键片段<br>④ 复核 `data_version` 秒级粒度的重复同步语义 |
-| 备注 | 本轮**未产生任何同步数据**；Mock 模式下同步接口固定返回 `5001 sensevoice_sync_disabled`，不伪造转写或情绪结果。当前 8000 后端已按新代码重启 |
+| 下线时间 | 2026-11-26（Asia/Shanghai，P21） |
+| 现状 | 同步端点（`/sensevoice-sync`、`/sensevoice-syncs`、`/sensevoice-syncs/{id}`）、`sensevoice_syncs` 表、`app/analysis/sensevoice_sync.py`、前端同步面板与 13 条契约测试均已删除；存量库执行 `202611261200_drop_sensevoice_syncs.py` 清理。历史 `audit_logs` 中的 `sensevoice.sync` / `target_type=sensevoice_sync` 常量保留只读，不再产生新记录 |
+| 替代能力 | 会话级 AI 分析结果统一由 `GET /api/admin/subjects/{id}/media` 的 `analysis` / `rules_fired` / `evidence` / `review_color` 返回，并在思想汇报展开区同屏展示 |
+| 追溯 | 见 §2.11；契约见 db.md §7、api.md §7.15–7.17（均已标注下线） |
 
 ### 2.4 进度记录：P14 管理端对象详情增强与状态看板合并
 
@@ -133,7 +134,7 @@
 | 项 | 内容 |
 |---|---|
 | 完成时间 | 2026-11-25（Asia/Shanghai） |
-| 变更内容 | ① `ui.md` 新增补记 12：移除独立看板区块/标题，全部内容并入「状态概览」；四图改为可折叠按钮（默认收起、`aria-expanded`、展开时挂载）；§4.2、§8.2、§9 同步<br>② `SubjectDetailPage.tsx` 删除「当前结果」后的独立 `<TrendBoard />`，改为在「状态概览」section 内、dashboard 条件块之后渲染，dashboard 失败时趋势区仍可用；顶部描述改为「心理状态趋势（并入状态概览）」<br>③ `TrendBoard.tsx` 根节点改为无标题的 `div.trendBlock`（仅上分隔线），新增 `openCharts` 受控状态（四键默认 false，切换区间不重置）；`ChartCard` 替换为 `ChartCollapsible`<br>④ 新建 `ChartCollapsible.tsx`：按钮+chevron、`aria-controls`、面板仅展开挂载、180ms 入场动画、`prefers-reduced-motion` 降级；加载骨架改为「汇总骨架 + 4 个按钮同高占位条」 |
+| 变更内容 | ① `ui.md` 新增补记 12：移除独立看板区块/标题，全部内容并入「状态概览」；四图改为可折叠按钮（默认收起、`aria-expanded`、展开时挂载）；§4.2、§8.2、§9 同步<br>② `SubjectDetailPage.tsx` 删除页面尾部独立 `<TrendBoard />` 区块，改为在「状态概览」section 内、dashboard 条件块之后渲染，dashboard 失败时趋势区仍可用；顶部描述改为「心理状态趋势（并入状态概览）」<br>③ `TrendBoard.tsx` 根节点改为无标题的 `div.trendBlock`（仅上分隔线），新增 `openCharts` 受控状态（四键默认 false，切换区间不重置）；`ChartCard` 替换为 `ChartCollapsible`<br>④ 新建 `ChartCollapsible.tsx`：按钮+chevron、`aria-controls`、面板仅展开挂载、180ms 入场动画、`prefers-reduced-motion` 降级；加载骨架改为「汇总骨架 + 4 个按钮同高占位条」 |
 | 完成状态 | 已完成。`npm run typecheck`、`npm run build` 通过；浏览器实测：页面无「心理状态分析看板」文本，四个按钮位于「状态概览」内且默认全部收起；点击 Russell 展开出完整散点图（坐标轴/象限/彩色点），再次点击收起；展开状态切换「近 7 天」并查询后仍保持展开；无横向滚动、无红色报错 |
 | 影响范围 | `docs/contracts/ui.md`；`web/src/admin/SubjectDetail/SubjectDetailPage.tsx`、`TrendBoard/{TrendBoard.tsx,TrendBoard.module.css,ChartCollapsible.tsx}`。未改四个图表组件、`TrendStrip`、`app/`、`api/`、`mock/`、`tests/` |
 | 后续待办 | 折叠状态仅存在内存，刷新页面后回到全收起；如需记住用户偏好再评估是否落 `localStorage`（当前契约禁止写入） |
@@ -160,6 +161,27 @@
 | 影响范围 | `docs/contracts/{api,ui,db}.md`、`README.md`、`.env.example`；`app/api/routers/ai_assist.py`、`app/api/{main,schemas}.py`、`app/db/constants.py`、`requirements.txt`、`tests/test_api/test_ai_assist.py`；`web/src/user/AiAssist/*`、`web/src/api/{aiAssist.ts,types.ts,mock.ts}`、`web/src/App.tsx`、`CaptureTasksPage.tsx`、`ComingSoonPage.tsx`。未改其他业务模块 |
 | 后续待办 | 真实上游已验证（`deepseek_web_search` 声明被接受、无降级）；Key 当前仅注入后端进程内存，重启需重新注入，持久化建议由用户通过 `setx` 或密钥管理工具完成；建议补用户级限流、`subject_id` 与 token 绑定、撤回同意后的停用策略；mock 模式固定未开通，不生成模拟回答 |
 | 备注 | 对话不留存：不写 SQLite 业务表、文件与浏览器存储；审计仅 `{model, web_search, turns, status, degraded}`，日志不记录请求体/响应体/异常原文/Key |
+
+### 2.11 进度记录：P21 思想汇报同屏分析与同步模块下线
+
+| 项 | 内容 |
+|---|---|
+| 完成时间 | 2026-11-26（Asia/Shanghai） |
+| 变更内容 | ① 删除 `app/analysis/sensevoice_sync.py`、`SensevoiceSync` 模型、`/sensevoice-sync` / `/sensevoice-syncs` / `/sensevoice-syncs/{id}` 三个端点、`SensevoiceSync*` Schema、前端 `SensevoiceSyncPanel` 及 API / 类型 / mock / 错误文案<br>② 删除迁移 `202611251200_add_sensevoice_syncs.py`，新增 `202611261200_drop_sensevoice_syncs.py` 并对 `storage/app.db` 执行 `DROP TABLE IF EXISTS sensevoice_syncs`<br>③ `/api/admin/subjects/{id}/media` 每条记录新增 `analysis`（`face` / `emotion` / `psych`）、`rules_fired`、`evidence`、`review_color`；同一请求一次性加载复盘并建立会话索引，避免 N+1<br>④ 管理端「思想汇报」展开区同屏展示人脸表情、语音情感、心理文本与五色规则/证据，默认不折叠<br>⑤ 删除页面底部「记录检索」占位卡片及失效导入 |
+| 完成状态 | 已完成。`python -m pytest tests -q` → 338 passed；`npm run typecheck` / `npm run build` 通过；`storage/app.db` 已确认无 `sensevoice_syncs` 表；旧端点按统一信封返回 `HTTP 200 + code=1004 not_found` |
+| 影响范围 | `app/api/routers/admin.py`、`app/api/{schemas,errors}.py`、`app/db/{models,__init__,init}.py`、`app/db/migrations/`、`app/analysis/README.md`；`web/src/api/{admin,types,mock}.ts`、`web/src/lib/errorMessages.ts`、`web/src/admin/SubjectDetail/`；`tests/test_api/test_admin_media.py`、`docs/contracts/{db,api,ui}.md` |
+| 保留项 | `app/db/constants.py` 的审计动作 `sensevoice.sync` 常量保留，确保历史 `audit_logs` 可读（只增不改）；业务码 `2004` 保留编码但不再使用 |
+| 后续待办 | 若后续需重新提供「转写/情绪同步」能力，应以新的会话级分析端点设计，不得恢复已删除表结构；历史同步数据如需迁移，只能从备份库脱敏导出 |
+
+### 2.12 进度记录：P22 当前结果移除与文档收尾
+
+| 项 | 内容 |
+|---|---|
+| 完成时间 | 2026-11-26（Asia/Shanghai） |
+| 变更内容 | ① 删除管理端对象详情「当前结果」占位栏目（该栏目无复盘列表查询端点，长期无数据来源），页面在「频率配置」后直接收尾；同步清理页面注释、`PageTitle` 描述与 `admin/README.md` 引用<br>② 清理 `PROGRESS.md` §2.3、`api.md` 补记·四、`db.md` 补记与审计动作表中的同步模块过期启用说明，统一标注已撤销/历史值<br>③ README 功能特性、对象详情使用说明、手工迁移命令、测试数量、已知限制与新增「更新日志」章节同步至 P21/P22 状态 |
+| 完成状态 | 已完成。`python -m pytest tests -q` → 338 passed；`npm run typecheck` / `npm run build` 通过；浏览器实测对象详情页无「当前结果」，状态概览、打卡与思想汇报、频率配置正常渲染，控制台无 error |
+| 影响范围 | `README.md`、`docs/PROGRESS.md`、`docs/contracts/{api,db,ui}.md`、`web/src/admin/README.md`、`web/src/admin/SubjectDetail/SubjectDetailPage.tsx`；无后端行为、表结构或接口变化 |
+| 后续待办 | ① 契约补齐对象档案字段与身份证号脱敏规则；② 复盘列表 `GET /api/admin/reviews` 与 60 秒频控 `1006`；③ 管理端由默认 mock 逐步切到真实接口并补路由级前端测试 |
 
 ## 3. 已完成功能模块与交付物
 
@@ -192,9 +214,9 @@
 | 用户端同意提交后直达 `/capture`，移除中间引导步骤 | 已实现（P11） | 本次提交 |
 | 用户端登录页 `/login`（用户名 / 密码 / 统一知情同意，演示账号 张三 / 123456） | 已实现（P12） | 本次提交 |
 | 独立知情同意页 `/consent` 合并进登录页，旧地址仅跳转 | 已实现（P12） | 本次提交 |
-| 思想汇报同步：`sensevoice_syncs` 表 + 迁移 + 同步/列表/详情三个管理端端点（默认关闭、失败回滚、读取留痕） | 已实现（P13） | 本次提交 |
-| 思想汇报同步适配层：严格 ASR + 情绪映射（emotion@1.0，无 Mock 回退） | 已实现（P13） | 本次提交 |
-| 管理端对象详情「思想汇报同步」面板 + 13 条契约测试 | 已实现（P13） | 本次提交 |
+| 思想汇报同步：`sensevoice_syncs` 表 + 迁移 + 同步/列表/详情三个管理端端点（默认关闭、失败回滚、读取留痕） | 已下线（P21） | 删除 |
+| 思想汇报同步适配层：严格 ASR + 情绪映射（emotion@1.0，无 Mock 回退） | 已下线（P21） | 删除 |
+| 管理端对象详情「思想汇报同步」面板 + 13 条契约测试 | 已下线（P21） | 删除 |
 | `/capture` 新增「AI援助」「教育学习」入口 + `/pending` 功能待开发占位页（**暂无后端支持**） | 已实现（P11） | 本次提交 |
 | 管理端对象列表姓名跳转详情 + 基础档案字段（性别/年龄/身份证号/住址等） | 已实现（P14，Mock） | 本次提交 |
 | 对象详情按日期筛选打卡影像与思想汇报录音（在线预览/播放，敏感面板默认折叠） | 已实现（P14 前端；P16 后端真实媒体与转写） | `P14` → `P16` |
@@ -209,7 +231,11 @@
 | 五色热力图改为按日期从左到右、窄屏自动折行（移除周列矩阵与横向滚动） | 已实现（P19） | 本次提交 |
 | AI 援助 `/ai-aid`：DeepSeek `deepseek-flash` + `deepseek_web_search`，SSE 流式、降级提示、审计元数据 | 已实现（P20） | 本次提交 |
 | AI 援助对话零留存：不建表、不写业务表/文件/浏览器存储，仅 `audit_logs(ai_assist.chat)` | 已实现（P20） | 本次提交 |
-| 远程仓库 | `main` 与 `origin/main` 同步 | `origin/main` @ `4c38d5d` |
+| 「思想汇报同步」全链路下线：删除三个端点、模型、`sensevoice_syncs` 表与前端面板；新增 drop 迁移与旧端点回归测试 | 已下线（P21） | 本次提交 |
+| `/media` 会话级 AI 分析透出：`analysis`（face/emotion/psych）、`rules_fired`、`evidence`、`review_color`；思想汇报展开区同屏展示 | 已实现（P21） | 本次提交 |
+| 删除「当前结果」「记录检索」占位栏目；对象详情在「频率配置」后收尾 | 已实现（P22） | 本次提交 |
+| 文档收尾：README / PROGRESS / api / db / ui 与代码状态同步，新增更新日志 | 已完成（P22） | 本次提交 |
+| 远程仓库 | `main` 与 `origin/main` 同步（2026-11-26） | 以 `git status` / `git log` 为准 |
 | `scripts/seed_demo.py` 演示数据（含占位素材） | 已实现 | `0bb78b5` |
 | QA 核验 + M1–M4/L4/L8 修复 | 已完成 | `638245e`（报告）、`7732930`（修复） |
 
@@ -327,22 +353,24 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 | `app/analysis/` | 四路 Provider、Schema 校验、一致性判定 | 已实现；ASR 已接 SenseVoice（`fa5a0d7`），emotion 复用 ASR 情绪标签接入（`sensevoice-emotion@1.0`），face/psych 仍为 mock；`risk_level` 已 wiring `map_risk_level`（`c46536e`） |
 | `app/grading/` | 五色规则、七日趋势偏移、合成封顶、复核任务草案 | 已实现并接入 API（`c46536e`）；低一致性 P0 已补 |
 | `app/api/` | analyze / reviews / tickets / dashboard | 已接入（`c46536e`）；余项见下 |
-| `web/` | 用户端页面 + 管理端列表/详情/复核任务 | 骨架已实现（`601d33d`），双模块与手动录音已落地（`8013d4e`）；P11 新增两个占位入口、P12 登录页、P13 同步面板、P14 详情档案/媒体/看板合并已提交；P15 本地化与术语统一在工作区；待与真实 API 联调 |
-| `web/` · 新增入口后端 | AI援助 / 教育学习 | **未开始**：无接口、无表、无业务逻辑，仅前端占位 |
+| `web/` | 用户端页面 + 管理端列表/详情/复核任务 | 已实现到 P22：登录页、双模块采集、AI 援助、对象详情档案/媒体/趋势/同屏分析均已落地；媒体、趋势与同步下线相关端点已切真实接口，档案字段与部分列表仍走 mock；待补路由级前端测试 |
+| `web/` · 新增入口后端 | AI援助 / 教育学习 | AI援助已接后端（P20）；教育学习仍为前端占位，无接口、无表、无业务逻辑 |
 
 **API 剩余延期项**
 
 - 复盘列表 `GET /api/admin/reviews`；
-- `GET /api/admin/sessions/{id}/transcript`（管理端敏感面板）；
-- （`GET /api/admin/subjects/{subject_id}` 已随双模块实现，`fa5a0d7`）
-- `AI援助` / `教育学习` 的接口与数据表（P11 仅前端占位，后端未排期）
 - 60 秒重复建会话频控（`1006`）；
 - `capture_busy` 专用业务码（当前复用 `code=5000`）；
-- 对象档案字段端点/字段定义（性别、年龄、身份证号、住址等，P14 仅前端 mock）；
-- 对象按日媒体端点 `GET /api/admin/subjects/{id}/media`（P14 仅前端 mock，缺鉴权/留存/留痕定义）；
-- 单对象看板变体语义（P14 以 `GET /api/admin/dashboard?subject_id=` mock 变体模拟）。
+- 对象档案字段端点/字段定义（性别、年龄、身份证号、住址等，当前仅前端 mock）；
+- 单对象看板变体语义（当前以 `GET /api/admin/dashboard?subject_id=` mock 变体模拟）；
+- 独立转写查看端点（当前转写文本随 `GET /api/admin/subjects/{id}/media` 返回，不单列端点）。
 
-已补齐（`4f5d1bf`）：`/api/user/*` 全部端点、`POST /api/sessions` 的 consent 三闸、`subject` 会话归属校验。
+已补齐：
+- `/api/user/*` 全部端点、`POST /api/sessions` 的 consent 三闸、`subject` 会话归属校验（`4f5d1bf`）；
+- 对象按日媒体 `GET /api/admin/subjects/{id}/media`、带鉴权的 `/face` 与 `/audio` 二进制端点、读取留痕（P16，P21 扩展分析字段）；
+- 单条复盘 `GET /api/admin/reviews/{review_id}`（P17）；
+- 心理状态趋势 `GET /api/admin/subjects/{id}/trends`（P16）；
+- AI 援助 `GET /api/user/ai-assist/status`、`POST /api/user/ai-assist/chat`（P20）。
 
 **演示数据说明**
 
@@ -366,13 +394,13 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 11. **契约已同步（2026-11-24）**：`grading.md` 补记规则 5 P0、复盘前提、复核任务主键归属与覆写顺序；`api.md` 补记 analyze / reviews / tickets / dashboard、窗口 `YYYY-MM-DD`、`1005 no_session_in_window`、consent 强校验；`ui.md` §3.1 统一两项齐备；`db.md` 补窗口格式与 0 会话不落库。版本号均保持不变（附加、非破坏）。同日追加：`ui.md` 补记 2（一次性授权、去保存期限）、`api.md` §7.1.2 `retention_days` 可选缺省 180；双模块追加 `ui.md` 补记 3、`api.md` 补记·二、`grading.md` 补记·三、`capture.md` 补记（face_only）、`db.md` 补记（kind/频率/`review_id` 可空/`detail_json`/`talk_to_staff`/`frequency.update`）、`analysis.schema.json` degraded 描述 checkin 例外（已提交）。
 12. **管理端前端仍用 mock**：`web/src/api/*` 已声明端点，但管理端页面尚未切真实 API（P14 的档案与媒体也仅 mock）；用户端 consent 已完成两项齐备门禁、一次性授权与去保存期限。
 13. **analyze 为同步长请求**：mock 下可接受；ASR 真实 API 超时默认 120s（`SENSEVOICE_TIMEOUT_SEC` 可覆盖，实测冷启约 20s、热调用约 3.5s），失败回退 Mock；后续接其余真模型需评估超时或改后台任务，并复用 `deps.get_session_factory()` 注入。
-14. **本机库需执行双模块迁移**：`app/db/migrations/202611241200_add_dual_module_tasks.py`（`python -m app.db.migrations.202611241200_add_dual_module_tasks`）；`storage/app.db` **已执行**该迁移与 P13 的 `202611251200_add_sensevoice_syncs.py`，旧库直接启动会缺 `kind`/频率列/`sensevoice_syncs` 表。
+14. **本机库需执行双模块迁移**：`app/db/migrations/202611241200_add_dual_module_tasks.py`（`python -m app.db.migrations.202611241200_add_dual_module_tasks`）；`storage/app.db` **已执行**该迁移与 P21 的 `202611261200_drop_sensevoice_syncs.py`，旧库直接启动会缺 `kind`/频率列；`sensevoice_syncs` 表已删除。
 15. **手动录音未做真实设备联调**：手动闭环已由 fake + 单元测试覆盖（不自动终止、stop 后落盘）；真实麦克风长时间录音的资源占用与 stop 响应时延需现场验证。
 16. **登录为开发演示账号**：`张三 / 123456` 由前端校验并写入 localStorage，密码会出现在打包产物中，**不可用于生产**；生产需接入真实认证。真实后端模式需 `VITE_USE_MOCK=0`、启动 uvicorn 并先执行 `seed_demo.py`，否则默认演示对象 S001 不存在会返回 `1004`。
-17. **思想汇报同步默认关闭、无真实数据**：`SENSEVOICE_SYNC_ENABLED` 默认 `0`；`.env` 缺 `SENSEVOICE_EMOTION_API_URL`，且 SenseVoice 服务 `8.133.237.222:8000` 连接失败/超时。关闭时接口返回 `5001 sensevoice_sync_disabled` 且不落库；张三当前**没有可用汇报音频**（今日 2 秒会话未保存音频，历史 seed 行引用的 `audio.wav` 不存在）。启用前需真实录制 ≥5 秒并确认情绪接口协议。另：`data_version` 为秒级粒度，同一秒内重复同步可能生成相同版本号，语义待定义（api@1.5 仅要求不覆盖历史）。
-18. **Uvicorn 需重启才能加载 P13 路由**：8000 服务未启用 `--reload`，新增端点后已手动重启；后续再改后端代码需重启。
+17. **思想汇报同步已下线**：P21 已删除同步端点、`sensevoice_syncs` 表、适配层与前端面板；历史 `audit_logs(action=sensevoice.sync)` 常量保留可读，但不再产生新记录。会话 AI 分析结果改由 `/api/admin/subjects/{id}/media` 的 `analysis` / `rules_fired` / `evidence` / `review_color` 返回。
+18. **后端改动需重启 Uvicorn**：8000 服务未启用 `--reload`；P21 删除同步端点、P21/P22 文档与前端改动后均已重启或重新构建，后续修改后端代码仍需手动重启。
 19. **P14 档案字段无后端与脱敏定义**：性别/年龄/身份证号/住址等仅存在于前端 mock（`subject.json.profiles`），`db` / `api` 契约未定义字段与可见范围；身份证号当前明文展示，接入真实接口前必须补脱敏与权限规则。
-20. **P14 媒体为演示素材**：打卡影像由文生图占位服务生成、录音为运行时构造的 2 秒静音 WAV；`GET /api/admin/subjects/{id}/media` 仅 mock 实现，鉴权、留存期与 `audit_logs` 留痕未定义；敏感面板展开只显示提示文案，未产生真实调阅记录。
+20. **管理端媒体已接真实后端、档案仍为 mock**：`/media`、`/face`、`/audio` 已返回真实采集产物并写 `sensitive.view` 留痕；档案字段（性别/年龄/身份证号/住址等）仍来自前端 mock，媒体留存期与脱敏规则尚未进入契约。
 21. **P14 单对象看板为 mock 变体**：详情页以 `GET /api/admin/dashboard?subject_id=` 取对象级数据，后端仅支持缺省取最近采集对象；`variants` 为前端模拟，需在契约中明确单对象语义后再联调。
 22. **P16 真实库尚未执行新 seed**：扩充后的 `seed_demo.py` 已在临时库验证（59 sessions / 20 reviews），但 `storage/app.db` 未重跑，以免覆盖既有真实会话；真实模式看板目前只能呈现既有数据，需要时按「先备份、再执行、用 `(subject_id, window_end)` 幂等跳过」流程处理。
 23. **P16 历史 `window_end` 格式漂移**：早期 `reviews.window_end` 存在完整 ISO 时间戳，契约要求 `YYYY-MM-DD`；趋势端点已兼容（按本地日期部分匹配），但历史数据未清洗，唯一约束在该类数据上可能出现同日多条。
@@ -380,11 +408,11 @@ ddd4968  docs: contracts v1.3 (db defaults + reviews window unique + api created
 
 ## 6. 下一步顺序（建议）
 
-1. **fe-user / fe-admin**：把 `web/src/api/*` 从 mock 切到真实端点；管理端接 `tickets` / `dashboard` / `subjects` 详情与媒体（用户端 consent 门禁与一次性授权已完成）；P16 趋势看板改用 `GET /api/admin/subjects/{id}/trends` 真实接口。
-2. **契约补齐（P14 前置）**：在 `db.md` / `api.md` / `ui.md` 定义对象档案字段与身份证号脱敏、`GET /api/admin/subjects/{id}/media` 的鉴权/留存/audit 留痕、单对象 dashboard 语义。
-3. **backend-engineer（余项）**：60 秒频控 `1006`、`capture_busy` 专用码、`GET /api/admin/reviews` 列表、转写查看、档案字段与媒体端点。
-4. **qa-guard + privacy-check**：每轮合并前跑 qa-guard；`c46536e` 新增的 analyze/reviews/tickets 端点涉及心理与复核任务数据，合并前过 privacy-check。P13 新增同步详情会读取转写原文、P14 档案与影像/录音涉敏感个人信息，合并前同样需过 privacy-check。
-5. **P13 启用（待外部条件）**：SenseVoice 与情绪服务恢复 → 配置 `SENSEVOICE_EMOTION_API_URL` 与 `SENSEVOICE_SYNC_ENABLED=1` → 张三真实录制 ≥5 秒汇报 → 管理端详情页点「同步思想汇报」→ 核对转写、情绪类型/置信度/关键片段与审计日志。
+1. **fe-user / fe-admin**：把 `web/src/api/*` 中仍走 mock 的对象列表、档案字段与部分复核任务页面切到真实端点；媒体、趋势、同屏分析与 AI 援助已接真实接口。
+2. **契约补齐**：在 `db.md` / `api.md` / `ui.md` 定义对象档案字段与身份证号脱敏、媒体留存期与删除策略、单对象 dashboard 语义。
+3. **backend-engineer（余项）**：60 秒频控 `1006`、`capture_busy` 专用码、`GET /api/admin/reviews` 列表、档案字段端点。
+4. **qa-guard + privacy-check**：每轮合并前跑 qa-guard；`c46536e` 新增的 analyze/reviews/tickets 端点涉及心理与复核任务数据，合并前过 privacy-check。P21 起 `/media` 会一并返回心理分析与证据，仍属敏感个人信息，合并前同样需过 privacy-check。
+5. **P21/P22 后续（可选）**：如需重新提供转写/情绪同步，应以会话级分析端点设计，不得恢复已删除表结构；当前分析结果统一从 `/media` 的 `analysis` 读取。
 
 ## 7. 三条红线
 
@@ -416,7 +444,7 @@ jsonschema 4.26.0（含 format 校验依赖）
 ```
 
 ```powershell
-pytest tests -q                                                      # 286 passed
+pytest tests -q                                                      # 338 passed
 python -m app.db.init                                                # 建库（幂等）
 uvicorn app.api.main:app --port 8000                                 # /docs 可访问
 cd web; npm run typecheck; npm run build                             # 前端类型检查与构建
@@ -441,11 +469,10 @@ git push origin main                                                 # 远程为
 - 正式验证用的 `subject_id` 目前是固定 UUID（`3b1e7c90-...`），是否保留为演示对象；
 - 是否将本机 SQLAlchemy 重装到 `<2.1` 以彻底消除 M1 现象；
 - `CAPTURE_FAKE` 是否增加 `APP_ENV != production` 守卫；
-- SenseVoice 情绪分析接口协议与字段映射（思想汇报同步用的独立情绪接口仍待真实服务确认）；analysis 的 `emotion` 通道已改为复用 ASR 情绪标签（`sensevoice-emotion@1.0`），置信度为经验值 `0.75`，待业务标定；
+- analysis 的 `emotion` 通道已复用 ASR 情绪标签（`sensevoice-emotion@1.0`），置信度为经验值 `0.75`，待业务标定；原「思想汇报同步」独立情绪接口随 P21 下线，不再需要确认协议。
 - 对象档案字段范围与身份证号脱敏规则（是否展示完整号码、谁能查看、是否留痕）；
 - 对象按日媒体端点的鉴权、留存期与 `audit_logs` 留痕口径；
-- 单对象 dashboard（`subject_id` 变体）的返回语义与失败降级方式；
-- `data_version` 同一秒重复同步的版本语义（复用/追加序号/毫秒）。
+- 单对象 dashboard（`subject_id` 变体）的返回语义与失败降级方式。
 
 ## 11. 文档维护约定
 
