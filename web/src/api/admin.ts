@@ -9,9 +9,6 @@ import type {
   Envelope,
   Paged,
   ReviewDetail,
-  SensevoiceSyncDetail,
-  SensevoiceSyncItem,
-  SensevoiceSyncList,
   SubjectDetail,
   SubjectFrequencyData,
   SubjectFrequencyPayload,
@@ -163,46 +160,6 @@ export function getReview(reviewId: string): Promise<Envelope<ReviewDetail>> {
   return request<ReviewDetail>(`/api/admin/reviews/${reviewId}`, {
     role: "admin",
   });
-}
-
-/** api@1.5 §7.15：触发思想汇报转写 + 情绪同步（缺省取最近一次可用汇报会话）。 */
-export function syncSensevoice(
-  subjectId: string,
-  sessionId?: string,
-): Promise<Envelope<SensevoiceSyncItem>> {
-  return request<SensevoiceSyncItem>(
-    `/api/admin/subjects/${encodeURIComponent(subjectId)}/sensevoice-sync`,
-    {
-      method: "POST",
-      role: "admin",
-      body: sessionId ? { session_id: sessionId } : {},
-    },
-  );
-}
-
-/** api@1.5 §7.16：同步记录列表，按 created_at 倒序。 */
-export function getSensevoiceSyncs(
-  subjectId: string,
-  page = 1,
-  pageSize = 20,
-): Promise<Envelope<SensevoiceSyncList>> {
-  return request<SensevoiceSyncList>(
-    `/api/admin/subjects/${encodeURIComponent(subjectId)}/sensevoice-syncs`,
-    {
-      role: "admin",
-      query: { page, page_size: pageSize },
-    },
-  );
-}
-
-/** api@1.5 §7.17：同步详情，读取即写 sensitive.view 留痕，仅由用户点击触发。 */
-export function getSensevoiceSync(
-  syncId: string,
-): Promise<Envelope<SensevoiceSyncDetail>> {
-  return request<SensevoiceSyncDetail>(
-    `/api/admin/sensevoice-syncs/${encodeURIComponent(syncId)}`,
-    { role: "admin" },
-  );
 }
 
 /** 面部图为二进制端点，不走 fetch 封装；mock 模式下不发起请求。 */

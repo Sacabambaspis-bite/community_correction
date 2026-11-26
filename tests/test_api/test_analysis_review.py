@@ -443,6 +443,12 @@ def test_dashboard_defaults_to_latest_captured_subject(
         json={"subject_id": _SUBJECT_ID, "window_end": "2026-11-23"},
         headers=admin_headers,
     )
+    # 固定汇报间隔，避免测试结论随运行日期漂移：只让签到逾期，汇报不逾期。
+    client.patch(
+        f"/api/admin/subjects/{_SUBJECT_ID}/frequency",
+        json={"report_interval_days": 36500},
+        headers=admin_headers,
+    )
 
     body = client.get("/api/admin/dashboard", headers=admin_headers).json()
     assert body["code"] == 0, body

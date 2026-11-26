@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
@@ -18,11 +16,6 @@ from sqlalchemy.orm import Session
 
 from app.analysis.errors import AnalysisInputError
 from app.analysis.paths import resolve_session_file, transcript_relative_path
-from app.analysis.sensevoice_sync import (
-    SensevoiceSyncError,
-    sync_configured,
-    sync_report,
-)
 from app.api.aggregation import (
     TrendRangeError,
     build_trends,
@@ -31,12 +24,10 @@ from app.api.aggregation import (
 )
 from app.api.deps import get_db, require_admin
 from app.api.errors import (
-    AI_UNAVAILABLE,
     INTERNAL_ERROR,
     INVALID_REQUEST,
     NOT_FOUND,
     STATE_CONFLICT,
-    SYNC_FAILED,
     BizError,
     current_request_id,
     envelope,
@@ -53,11 +44,6 @@ from app.api.integration import (
 from app.api.schemas import (
     DashboardOut,
     ReviewCreateRequest,
-    SensevoiceSyncDetailOut,
-    SensevoiceSyncItemOut,
-    SensevoiceSyncListOut,
-    SensevoiceSyncOut,
-    SensevoiceSyncRequest,
     SessionListItem,
     SessionListOut,
     SubjectFrequencyOut,
@@ -78,7 +64,6 @@ from app.db.models import (
     CaptureSession,
     Review,
     ReviewTicket,
-    SensevoiceSync,
     Subject,
 )
 
@@ -92,22 +77,6 @@ _TICKET_STATUSES = frozenset({"pending", "confirmed", "corrected", "closed"})
 _PRIORITIES = frozenset({"P0", "P1", "P2"})
 _COLORS = ("green", "blue", "yellow", "orange", "red")
 _WINDOW_END_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
-#: 思想汇报同步开关；默认关闭，只有显式真值才启用（大小写不敏感）。
-_SENSEVOICE_SYNC_ENV = "SENSEVOICE_SYNC_ENABLED"
-_SENSEVOICE_SYNC_TRUTHY = frozenset({"1", "true", "yes", "on"})
-#: SensevoiceSyncError.code → 业务码（api.md §7.15）。
-_SENSEVOICE_ERROR_CODES = {
-    "sensevoice_unavailable": AI_UNAVAILABLE,
-    "transcription_failed": SYNC_FAILED,
-    "emotion_failed": SYNC_FAILED,
-}
-
-
-def _sensevoice_sync_enabled() -> bool:
-    """读取功能开关；缺省 `"0"`，仅 1/true/yes/on 视为开启。"""
-    raw = os.environ.get(_SENSEVOICE_SYNC_ENV, "0")
-    return raw.strip().lower() in _SENSEVOICE_SYNC_TRUTHY
 
 
 def _now() -> str:
@@ -400,30 +369,132 @@ def _read_transcript(session: CaptureSession) -> Optional[str]:
     return text[:_TRANSCRIPT_MAX_CHARS] if text else None
 
 
-def _media_emotion(session: CaptureSession) -> Optional[dict]:
-    """从 analysis_json 提取语音情绪通道结果；未分析或结构异常返回 None。"""
+def _analysis_channels(session: CaptureSession) -> dict:
+    """解析 `analysis_json.channels`；未分析或结构异常时返回空 dict。"""
     raw = getattr(session, "analysis_json", None)
     if not raw:
-        return None
+        return {}
     try:
         payload = json.loads(raw)
     except (TypeError, ValueError):
-        return None
-    channel = (payload.get("channels") or {}).get("emotion") or {}
-    output = channel.get("output") or {}
-    if not output:
-        return None
-    return {
-        "status": channel.get("status"),
-        "model_version": channel.get("model_version"),
-        "valence": output.get("valence"),
-        "arousal": output.get("arousal"),
-        "label": output.get("label"),
-    }
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    channels = payload.get("channels")
+    return channels if isinstance(channels, dict) else {}
 
 
-def _media_record(session: CaptureSession, transcript: Optional[str]) -> dict:
-    """单条采集记录：媒体 URL 与转写按是否存在给值，其余字段原样透出。"""
+def _channel_parts(channels: dict, name: str) -> tuple[dict, dict]:
+    """取通道外层（status/model_version）与 output；类型不符一律视为空。"""
+    channel = channels.get(name)
+    channel = channel if isinstance(channel, dict) else {}
+    output = channel.get("output")
+    output = output if isinstance(output, dict) else {}
+    return channel, output
+
+
+def _media_analysis(session: CaptureSession) -> dict:
+    """提取人脸、语音情感、心理文本三路只读结果；无输出时对应项为 None。"""
+    channels = _analysis_channels(session)
+
+    face_channel, face_output = _channel_parts(channels, "face")
+    face = None
+    if face_output:
+        face = {
+            "status": face_channel.get("status"),
+            "model_version": face_channel.get("model_version"),
+            "expression_label": face_output.get("expression_label"),
+            "intensity": face_output.get("intensity"),
+            "face_confidence": face_output.get("face_confidence"),
+            "frame_count": face_output.get("frame_count"),
+            "valid_frames": face_output.get("valid_frames"),
+        }
+
+    emotion_channel, emotion_output = _channel_parts(channels, "emotion")
+    emotion = None
+    if emotion_output:
+        emotion = {
+            "status": emotion_channel.get("status"),
+            "model_version": emotion_channel.get("model_version"),
+            "valence": emotion_output.get("valence"),
+            "arousal": emotion_output.get("arousal"),
+            "label": emotion_output.get("label"),
+        }
+
+    psych_channel, psych_output = _channel_parts(channels, "psych")
+    psych = None
+    if psych_output:
+        raw_keywords = psych_output.get("keywords")
+        keywords = (
+            [item for item in raw_keywords if isinstance(item, str)]
+            if isinstance(raw_keywords, list)
+            else []
+        )
+        psych = {
+            "status": psych_channel.get("status"),
+            "model_version": psych_channel.get("model_version"),
+            "signal_strength": psych_output.get("signal_strength"),
+            "intent_flag": psych_output.get("intent_flag"),
+            "keywords": keywords,
+            "rationale_signal": psych_output.get("rationale_signal"),
+        }
+
+    return {"face": face, "emotion": emotion, "psych": psych}
+
+
+def _load_evidence(raw: Optional[str]) -> list[dict]:
+    """解析 `evidence_json`；仅保留对象行，结构异常时返回空列表。"""
+    try:
+        value = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _media_review_index(db: Session, subject_id: str) -> dict[str, dict]:
+    """按 session_id 取最新一条包含该会话证据的复盘。
+
+    同一会话可能被多次复盘覆盖，`reviews` 按创建时间倒序，先到先得；
+    规则名只取该会话证据行涉及的 `rule_id`，确保「规则名称与证据」一一对应。
+    """
+    reviews = db.scalars(
+        select(Review)
+        .where(Review.subject_id == subject_id)
+        .order_by(desc(Review.created_at))
+    ).all()
+
+    index: dict[str, dict] = {}
+    for review in reviews:
+        grouped: dict[str, list[dict]] = {}
+        for row in _load_evidence(review.evidence_json):
+            session_id = row.get("session_id")
+            if not isinstance(session_id, str) or session_id in index:
+                continue
+            grouped.setdefault(session_id, []).append(row)
+        for session_id, rows in grouped.items():
+            rules: list[str] = []
+            for row in rows:
+                rule_id = row.get("rule_id")
+                if isinstance(rule_id, str) and rule_id not in rules:
+                    rules.append(rule_id)
+            index[session_id] = {
+                "review_color": review.final_color,
+                "rules_fired": rules,
+                "evidence": rows,
+            }
+    return index
+
+
+def _media_record(
+    session: CaptureSession,
+    transcript: Optional[str],
+    analysis: dict,
+    review_info: Optional[dict],
+) -> dict:
+    """单条采集记录：媒体 URL、转写、三路分析与五色证据一并只读透出。"""
+    info = review_info or {}
     return {
         "session_id": session.id,
         "kind": session.kind,
@@ -438,7 +509,11 @@ def _media_record(session: CaptureSession, transcript: Optional[str]) -> dict:
             f"/api/admin/sessions/{session.id}/audio" if session.audio_path else None
         ),
         "transcript_text": transcript,
-        "emotion": _media_emotion(session),
+        "emotion": analysis["emotion"],
+        "analysis": analysis,
+        "rules_fired": info.get("rules_fired", []),
+        "evidence": info.get("evidence", []),
+        "review_color": info.get("review_color"),
     }
 
 
@@ -478,13 +553,21 @@ def get_subject_media(
 
     # 查询结果按 captured_at 降序；反转为升序（最早在前、最新在后），
     # 前端默认选中最后一条即「该日最近更新的记录」。
+    review_index = _media_review_index(db, subject_id)
     records: list[dict] = []
     transcript_count = 0
     for session in reversed(selected):
         transcript = _read_transcript(session)
         if transcript is not None:
             transcript_count += 1
-        records.append(_media_record(session, transcript))
+        records.append(
+            _media_record(
+                session,
+                transcript,
+                _media_analysis(session),
+                review_index.get(session.id),
+            )
+        )
 
     if transcript_count:
         db.add(
@@ -1015,226 +1098,3 @@ def get_subject_trends(
         behavior_anchors=anchors,
     )
     return envelope(data=SubjectTrendsOut(**data).model_dump())
-
-
-# ---- 思想汇报同步（api.md §7.15 / §7.16 / §7.17）----
-
-
-def _sync_item_fields(sync: SensevoiceSync) -> dict:
-    """列表项与 POST 响应共用的同步摘要（不含转写与情绪片段）。"""
-    return {
-        "sync_id": sync.id,
-        "subject_id": sync.subject_id,
-        "session_id": sync.session_id,
-        "status": sync.status,
-        "provider": sync.provider,
-        "emotion_primary": sync.emotion_primary,
-        "emotion_confidence": sync.emotion_confidence,
-        "data_version": sync.data_version,
-        "operator": sync.operator,
-        "created_at": sync.created_at,
-    }
-
-
-def _latest_report_session(db: Session, subject_id: str) -> Optional[CaptureSession]:
-    """对象最近一次可用汇报会话：report + captured + 有音频。"""
-    return db.scalars(
-        select(CaptureSession)
-        .where(
-            CaptureSession.subject_id == subject_id,
-            CaptureSession.kind == "report",
-            CaptureSession.status == "captured",
-            CaptureSession.audio_path.is_not(None),
-        )
-        .order_by(desc(CaptureSession.captured_at))
-        .limit(1)
-    ).first()
-
-
-@router.post("/subjects/{subject_id}/sensevoice-sync")
-def sync_subject_report(
-    subject_id: str,
-    payload: Optional[SensevoiceSyncRequest] = None,
-    _role: str = Depends(require_admin),
-    db: Session = Depends(get_db),
-) -> dict:
-    subject = db.get(Subject, subject_id)
-    if subject is None:
-        raise BizError(NOT_FOUND, "not_found")
-
-    requested_session_id = payload.session_id if payload is not None else None
-    session: Optional[CaptureSession] = None
-    if requested_session_id:
-        session = db.get(CaptureSession, requested_session_id)
-        if session is None or session.subject_id != subject_id:
-            raise BizError(NOT_FOUND, "not_found")
-
-    # 开关关闭时直接返回，不查会话产物、不落库、不写审计。
-    if not _sensevoice_sync_enabled():
-        raise BizError(AI_UNAVAILABLE, "sensevoice_sync_disabled")
-
-    if requested_session_id:
-        if (
-            session.kind != "report"
-            or session.status != "captured"
-            or not session.audio_path
-        ):
-            raise BizError(STATE_CONFLICT, "no_report_audio")
-    else:
-        session = _latest_report_session(db, subject_id)
-        if session is None:
-            raise BizError(STATE_CONFLICT, "no_report_audio")
-
-    if not sync_configured():
-        raise BizError(AI_UNAVAILABLE, "sensevoice_unavailable")
-
-    try:
-        audio_file = resolve_session_file(
-            Path(STORAGE_ROOT), subject_id, session.id, session.audio_path
-        )
-    except AnalysisInputError:
-        db.rollback()
-        raise BizError(STATE_CONFLICT, "no_report_audio") from None
-    try:
-        audio_size = audio_file.stat().st_size if audio_file.is_file() else 0
-    except OSError:
-        audio_size = 0
-    if audio_size <= 0:
-        db.rollback()
-        raise BizError(STATE_CONFLICT, "no_report_audio")
-
-    try:
-        result = sync_report(audio_file, duration_sec=session.duration_sec)
-    except SensevoiceSyncError as exc:
-        db.rollback()
-        raise BizError(
-            _SENSEVOICE_ERROR_CODES.get(exc.code, SYNC_FAILED), exc.code
-        ) from None
-
-    emotion = result.emotion if isinstance(result.emotion, dict) else {}
-    primary = emotion.get("primary")
-    primary = primary if isinstance(primary, str) else None
-    raw_confidence = emotion.get("confidence")
-    confidence: Optional[float] = None
-    if isinstance(raw_confidence, (int, float)) and not isinstance(
-        raw_confidence, bool
-    ):
-        confidence = float(raw_confidence)
-
-    now = _now()
-    sync = SensevoiceSync(
-        id=str(uuid4()),
-        subject_id=subject_id,
-        session_id=session.id,
-        status="succeeded",
-        provider=result.provider,
-        transcript_text=result.transcript_text,
-        transcript_language=result.transcript_language,
-        emotion_json=json.dumps(emotion, ensure_ascii=False),
-        emotion_primary=primary,
-        emotion_confidence=confidence,
-        data_version=result.data_version,
-        operator="staff",
-        error_code=None,
-        error_message=None,
-        created_at=now,
-        updated_at=now,
-    )
-    db.add(sync)
-    # detail_json 只允许版本与来源会话，禁止写入转写原文。
-    db.add(
-        AuditLog(
-            actor_type="staff",
-            actor_id=None,
-            action="sensevoice.sync",
-            target_type="sensevoice_sync",
-            target_id=sync.id,
-            detail_json=json.dumps(
-                {
-                    "session_id": session.id,
-                    "data_version": result.data_version,
-                    "operator": "staff",
-                }
-            ),
-            request_id=current_request_id(),
-            created_at=now,
-        )
-    )
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise BizError(INTERNAL_ERROR, "sync_write_failed") from None
-
-    return envelope(data=SensevoiceSyncOut(**_sync_item_fields(sync)).model_dump())
-
-
-@router.get("/subjects/{subject_id}/sensevoice-syncs")
-def list_sensevoice_syncs(
-    subject_id: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
-    _role: str = Depends(require_admin),
-    db: Session = Depends(get_db),
-) -> dict:
-    subject = db.get(Subject, subject_id)
-    if subject is None:
-        raise BizError(NOT_FOUND, "not_found")
-
-    condition = SensevoiceSync.subject_id == subject_id
-    total = db.scalar(
-        select(func.count()).select_from(SensevoiceSync).where(condition)
-    ) or 0
-    rows = db.scalars(
-        select(SensevoiceSync)
-        .where(condition)
-        .order_by(desc(SensevoiceSync.created_at))
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    ).all()
-
-    items = [SensevoiceSyncItemOut(**_sync_item_fields(row)) for row in rows]
-    return envelope(
-        data=SensevoiceSyncListOut(
-            items=items, page=page, page_size=page_size, total=total
-        ).model_dump()
-    )
-
-
-@router.get("/sensevoice-syncs/{sync_id}")
-def get_sensevoice_sync(
-    sync_id: str,
-    _role: str = Depends(require_admin),
-    db: Session = Depends(get_db),
-) -> dict:
-    sync = db.get(SensevoiceSync, sync_id)
-    if sync is None:
-        raise BizError(NOT_FOUND, "not_found")
-
-    db.add(
-        AuditLog(
-            actor_type="staff",
-            actor_id=None,
-            action="sensitive.view",
-            target_type="sensevoice_sync",
-            target_id=sync.id,
-            detail_json=json.dumps({"field": "transcript"}),
-            request_id=current_request_id(),
-            created_at=_now(),
-        )
-    )
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise BizError(INTERNAL_ERROR, "audit_write_failed") from None
-
-    return envelope(
-        data=SensevoiceSyncDetailOut(
-            **_sync_item_fields(sync),
-            transcript_text=sync.transcript_text,
-            transcript_language=sync.transcript_language,
-            emotion=_load_json_obj(sync.emotion_json),
-            updated_at=sync.updated_at,
-        ).model_dump()
-    )

@@ -6,7 +6,7 @@
 - `pipeline.py`：四路编排、异常隔离、一致性判定、degraded 包装与最终 Schema 校验
 - `providers/`：`base.py` 统一接口；`mock_*.py` 确定性 Mock；`sensevoice_asr.py` / `sensevoice_emotion.py` 真实通道；`__init__.py` 注册表
 - `schema.py`：加载 `docs/contracts/analysis.schema.json`，做通道级 + 整体强校验
-- `config.py`：`CONFIDENCE_THRESHOLD=0.6`、`MOCK_SCENARIO`；`sensevoice_sync.py` 是 P13 严格同步（失败即报错，不回退 Mock）
+- `config.py`：`CONFIDENCE_THRESHOLD=0.6`、`MOCK_SCENARIO`
 
 ## 四路 Provider
 - `asr`：语音转写，落盘 `transcript.txt`；`emotion`：复用 ASR 情感标签，不重复请求云端

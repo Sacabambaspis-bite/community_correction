@@ -351,44 +351,6 @@ class SubjectTrendsOut(BaseModel):
     degraded: list[str] = Field(default_factory=list)
 
 
-# ---- 思想汇报同步（api@1.5 §7.15-§7.17 / db@1.5 §7）----
-
-
-class SensevoiceSyncRequest(BaseModel):
-    session_id: Optional[str] = None
-
-
-class SensevoiceSyncItemOut(BaseModel):
-    sync_id: str
-    subject_id: str
-    session_id: str
-    status: str
-    provider: str
-    emotion_primary: Optional[str] = None
-    emotion_confidence: Optional[float] = None
-    data_version: str
-    operator: str
-    created_at: str
-
-
-class SensevoiceSyncListOut(BaseModel):
-    items: list[SensevoiceSyncItemOut]
-    page: int
-    page_size: int
-    total: int
-
-
-class SensevoiceSyncOut(SensevoiceSyncItemOut):
-    """POST 成功返回的同步摘要（字段同列表项）。"""
-
-
-class SensevoiceSyncDetailOut(SensevoiceSyncItemOut):
-    transcript_text: str
-    transcript_language: Optional[str] = None
-    emotion: dict = Field(default_factory=dict)
-    updated_at: str
-
-
 # ---- AI 援助（api@1.5 §7.19-§7.20）----
 
 

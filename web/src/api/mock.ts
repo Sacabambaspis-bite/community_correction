@@ -16,7 +16,9 @@ import type {
   DailyMediaRecord,
   DashboardData,
   Envelope,
+  EvidenceRow,
   FeedbackData,
+  MediaAnalysis,
   Paged,
   ReviewDetail,
   SessionCreateData,
@@ -555,6 +557,19 @@ function mockImageUrl(prompt: string | null): string | null {
 function dailyRecordsOf(raw: RawDailyMedia): DailyMediaRecord[] {
   const records: DailyMediaRecord[] = [];
   if (raw.checkin) {
+    const analysis: MediaAnalysis = {
+      face: {
+        status: "ok",
+        model_version: "mock-face@1.0",
+        expression_label: "neutral",
+        intensity: 0.22,
+        face_confidence: 0.71,
+        frame_count: 3,
+        valid_frames: 3,
+      },
+      emotion: null,
+      psych: null,
+    };
     records.push({
       session_id: raw.checkin.checkin_id,
       kind: "checkin",
@@ -566,9 +581,50 @@ function dailyRecordsOf(raw: RawDailyMedia): DailyMediaRecord[] {
       audio_url: null,
       transcript_text: null,
       emotion: null,
+      analysis,
+      rules_fired: [],
+      evidence: [],
+      review_color: null,
     });
   }
   if (raw.report) {
+    const emotion = {
+      status: "ok",
+      model_version: "mock-emotion@1.0",
+      valence: 0.1,
+      arousal: 0.3,
+      label: "neutral",
+    };
+    const analysis: MediaAnalysis = {
+      face: {
+        status: "ok",
+        model_version: "mock-face@1.0",
+        expression_label: "neutral",
+        intensity: 0.24,
+        face_confidence: 0.69,
+        frame_count: 4,
+        valid_frames: 4,
+      },
+      emotion,
+      psych: {
+        status: "ok",
+        model_version: "mock-psych@1.0",
+        signal_strength: 41.2,
+        intent_flag: "none",
+        keywords: ["累", "睡不着"],
+        rationale_signal: "出现疲劳与睡眠相关表达，未出现指向性意图",
+      },
+    };
+    const evidence: EvidenceRow[] = [
+      {
+        rule_id: "R_SINGLE_ORANGE",
+        field_path: "channels.psych.output.signal_strength",
+        observed_value: 41.2,
+        threshold_key: "SINGLE_ORANGE_SIGNAL_MIN",
+        threshold_value: 40,
+        session_id: raw.report.report_id,
+      },
+    ];
     records.push({
       session_id: raw.report.report_id,
       kind: "report",
@@ -581,13 +637,11 @@ function dailyRecordsOf(raw: RawDailyMedia): DailyMediaRecord[] {
         ? mockAudioUrl(raw.report.report_id)
         : null,
       transcript_text: raw.report.transcript_text ?? null,
-      emotion: {
-        status: "ok",
-        model_version: "mock-emotion@1.0",
-        valence: 0.1,
-        arousal: 0.3,
-        label: "neutral",
-      },
+      emotion,
+      analysis,
+      rules_fired: ["R_SINGLE_ORANGE"],
+      evidence,
+      review_color: "orange",
     });
   }
   return records;
@@ -897,33 +951,6 @@ export async function mockRequest<T>(
     };
     subjectFrequencies.set(subjectId, next);
     return ok<T>(next);
-  }
-
-  /* 思想汇报同步（api@1.5 §7.15–7.17）：能力默认关闭，mock 不伪造转写/情绪结果。 */
-  if (
-    method === "POST" &&
-    /^\/api\/admin\/subjects\/[^/]+\/sensevoice-sync$/.test(path)
-  ) {
-    return fail<T>(5001, "sensevoice_sync_disabled");
-  }
-
-  if (
-    method === "GET" &&
-    /^\/api\/admin\/subjects\/[^/]+\/sensevoice-syncs$/.test(path)
-  ) {
-    return ok<T>({
-      items: [],
-      page: Number(textQuery(options, "page")) || 1,
-      page_size: Number(textQuery(options, "page_size")) || 20,
-      total: 0,
-    });
-  }
-
-  if (
-    method === "GET" &&
-    /^\/api\/admin\/sensevoice-syncs\/[^/]+$/.test(path)
-  ) {
-    return fail<T>(1004, "not_found");
   }
 
   /* 对象心理状态趋势（api@1.5 §7.18）：必须早于通用 /api/admin/subjects/{id} 分支，

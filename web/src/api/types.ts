@@ -205,9 +205,9 @@ export type TicketListItem = {
 export type EvidenceRow = {
   rule_id: string;
   field_path: string;
-  observed_value: string | number;
+  observed_value: string | number | boolean;
   threshold_key: string;
-  threshold_value: string | number;
+  threshold_value: string | number | boolean;
   session_id: string;
 };
 
@@ -322,50 +322,7 @@ export type AiAssistEvent =
     }
   | { type: "error"; code: number; message: string; request_id: string };
 
-/* ---------- 管理端 · 思想汇报同步（api@1.5 §7.15–7.17） ---------- */
-
-/** §7.15 / §7.16 列表项；列表不返回转写与情绪片段。 */
-export type SensevoiceSyncItem = {
-  sync_id: string;
-  subject_id: string;
-  session_id: string;
-  status: string;
-  provider: string;
-  emotion_primary: string | null;
-  emotion_confidence: number | null;
-  data_version: string;
-  operator: string;
-  created_at: string;
-};
-
-/** §7.16 分页结构 */
-export type SensevoiceSyncList = Paged<SensevoiceSyncItem>;
-
-/** db@1.5 §7.1 情绪片段 */
-export type SensevoiceEmotionTrigger = {
-  text: string;
-  label: string;
-  start_sec: number;
-  end_sec: number;
-};
-
-/** db@1.5 §7.1 emotion_json 解析结果 */
-export type SensevoiceEmotion = {
-  schema_version: string;
-  primary: string;
-  confidence: number;
-  scores: Record<string, number>;
-  triggers: SensevoiceEmotionTrigger[];
-};
-
-/** §7.17 同步详情：列表字段 + 转写全文 + 情绪报告（读取留痕）。 */
-export type SensevoiceSyncDetail = SensevoiceSyncItem & {
-  transcript_text: string;
-  transcript_language: string | null;
-  emotion: SensevoiceEmotion | null;
-  updated_at: string;
-};
-
+/* ---------- 管理端 ---------- */
 /** api@1.5 §7.11 与补记·二 */
 export type DashboardData = {
   subject_id: string;
@@ -482,12 +439,39 @@ export type SubjectTrends = {
 
 /** 语音情绪通道结果，与录音一一对应。 */
 export type MediaEmotion = {
-  /** 通道状态：ok / degraded / failed。 */
+  /** 通道状态：ok / degraded / skipped。 */
   status: string | null;
   model_version: string | null;
   valence: number | null;
   arousal: number | null;
   label: string | null;
+};
+
+/** 人脸表情通道结果（api@1.5 §7.21 `analysis.face`）。 */
+export type MediaFaceAnalysis = {
+  status: string | null;
+  model_version: string | null;
+  expression_label: string | null;
+  intensity: number | null;
+  face_confidence: number | null;
+  frame_count: number | null;
+  valid_frames: number | null;
+};
+
+/** 心理文本通道结果（api@1.5 §7.21 `analysis.psych`）。 */
+export type MediaPsychAnalysis = {
+  status: string | null;
+  model_version: string | null;
+  signal_strength: number | null;
+  intent_flag: string | null;
+  keywords: string[];
+  rationale_signal: string | null;
+};
+
+export type MediaAnalysis = {
+  face: MediaFaceAnalysis | null;
+  emotion: MediaEmotion | null;
+  psych: MediaPsychAnalysis | null;
 };
 
 export type DailyMediaRecord = {
@@ -501,8 +485,16 @@ export type DailyMediaRecord = {
   audio_url: string | null;
   /** 与音频一一对应的转写文本；无转写时为 null。 */
   transcript_text: string | null;
-  /** 与音频一一对应的语音情绪；未分析时为 null。 */
+  /** 与音频一一对应的语音情绪；未分析时为 null（保留字段兼容）。 */
   emotion: MediaEmotion | null;
+  /** 人脸 / 语音情感 / 心理文本三路结构化结果。 */
+  analysis: MediaAnalysis;
+  /** 该会话命中的规则编号（取自最新包含该会话证据的复盘）。 */
+  rules_fired: string[];
+  /** 该会话在复盘证据链中的证据行。 */
+  evidence: EvidenceRow[];
+  /** 命中复盘的五色；无复盘时为 null。 */
+  review_color: Color | null;
 };
 
 export type SubjectMediaData = {

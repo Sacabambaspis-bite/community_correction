@@ -1,7 +1,7 @@
 """建库入口：`python -m app.db.init`。
 
-只创建六张业务表（subjects / sessions / reviews / review_tickets / audit_logs /
-sensevoice_syncs），不插入任何演示数据；幂等，重复执行不报错。
+只创建五张业务表（subjects / sessions / reviews / review_tickets / audit_logs），
+不插入任何演示数据；幂等，重复执行不报错。
 """
 
 from __future__ import annotations

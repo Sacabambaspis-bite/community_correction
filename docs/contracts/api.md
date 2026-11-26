@@ -24,12 +24,9 @@
 > 2. 新增 `POST /api/sessions/{id}/stop`（用户端 + subject 归属校验）：仅手动模式且 `status=created` 时有效，置位停止事件，返回 `code=0`、`data={session_id}`；重复调用幂等返回成功；会话已 `captured`/`failed`、非手动模式或 `kind=checkin` 时返回 `1005` 状态冲突；不存在 `1004`、越权 `1003`。
 > 3. 手动模式下录音仅因用户调用 stop 而结束，服务端不设计时自动终止；录音保存、状态回写（`created → captured/failed`）、轮询与 analyze 流程不变。
 
-> **v1.5 实现补记·四（2026-11-25，附加、非破坏）**：新增思想汇报同步脚手架——
-> 1. 新表 `sensevoice_syncs`（db@1.5 §7）。
-> 2. 新增 `POST /api/admin/subjects/{subject_id}/sensevoice-sync`（触发转写 + 情绪同步，单事务，失败回滚）、`GET /api/admin/subjects/{subject_id}/sensevoice-syncs`（记录列表）、`GET /api/admin/sensevoice-syncs/{sync_id}`（详情，读取转写须留痕）。
-> 3. 同步能力由环境变量 `SENSEVOICE_SYNC_ENABLED` 控制，**默认关闭**；关闭时接口返回 `5001 sensevoice_sync_disabled`，不落库、不写审计。
-> 4. 新增业务码 `2004`（同步失败：`transcription_failed` / `emotion_failed`）、`5001`（外部 AI 能力不可用）。
-> 5. 真实情绪分析接口协议未确认前，只落地表、接口与前端面板；禁止用 Mock 结果冒充真实同步。
+> **v1.5 实现补记·四（2026-11-25）【已撤销】**：曾新增 `sensevoice_syncs` 表与三个管理端同步端点（`/sensevoice-sync`、`/sensevoice-syncs`、`/sensevoice-syncs/{id}`）。该模块已于 2026-11-26 整体删除，相关端点、表与开关配置均不存在，详见下条撤销补记。
+
+> **v1.5 实现补记·四撤销（2026-11-26，破坏性）**：「思想汇报同步」模块整体下线——删除 §7.15–§7.17 三个端点与 `sensevoice_syncs` 表，业务码 `2004` 停用（保留编码不分配给其他语义）；前端同步面板一并移除。`audit_logs` 历史 `sensevoice.sync` 记录保留可读。§7.21 媒体端点扩展为每条记录返回 `analysis` / `rules_fired` / `evidence` / `review_color`。
 
 > **v1.5 实现补记·五（2026-11-25，附加、非破坏）**：新增对象心理状态趋势端点 `GET /api/admin/subjects/{subject_id}/trends`（§7.18）——
 > 1. 支持任意日期区间（`start_date` / `end_date`，闭区间，缺省近 14 天，跨度上限 366 天）；区间内无数据的自然日仍逐日返回，保证前端热力图与日历时序完整。
@@ -108,10 +105,10 @@
 | 1006 | 频率限制 | 同一对象 60 秒内重复建会话 |
 | 2001 | 采集失败（无可用产物） | `sessions.status == failed`；`failed` 会话调用分析 |
 | 2003 | 分析失败（结果不可用） | `analysis_status=failed`，需重采或人工处理 |
-| 2004 | 思想汇报同步失败（结果不可用） | `transcription_failed` / `emotion_failed`；本次同步已回滚，可重试或人工处理 |
+| 2004 | （停用） | 原「思想汇报同步失败」；同步模块已下线，编码保留不复用 |
 | 4000 | 会话未采集完成 | `sessions.status == created` 时调用分析 |
 | 5000 | 内部错误 / 临时占位 | 未捕获异常；分析管线未就绪（`message=analysis_pipeline_not_ready`）；采集并发冲突（`message=capture_busy`，专用错误码待增补） |
-| 5001 | 外部 AI 能力不可用 | 同步开关未启用（`sensevoice_sync_disabled`）；SenseVoice 未配置或服务不可达（`sensevoice_unavailable`） |
+| 5001 | 外部 AI 能力不可用 | AI 援助未启用或上游不可达（`ai_assist_disabled` / `ai_assist_unavailable`） |
 
 > 业务错误均返回 HTTP 200，业务结果以 `code` 为准；未捕获异常返回 HTTP 500 + `code=5000`。
 > `2001` / `2003` 不视为 HTTP 错误，前端依据 `code` 决定展示哪种提示。
@@ -186,9 +183,6 @@ Authorization: Bearer <token>
 | `GET` | `/api/admin/tickets/{ticket_id}` | 已实现 | 复核任务详情（留痕）（见 §7.13） |
 | `POST` | `/api/admin/tickets/{ticket_id}/transition` | 已实现 | 复核任务流转（见 §7.10） |
 | `GET` | `/api/admin/dashboard` | 已实现 | 看板数据（见 §7.11） |
-| `POST` | `/api/admin/subjects/{subject_id}/sensevoice-sync` | 已实现（默认关闭） | 触发思想汇报转写 + 情绪同步；受 `SENSEVOICE_SYNC_ENABLED` 控制（见 §7.15） |
-| `GET` | `/api/admin/subjects/{subject_id}/sensevoice-syncs` | 已实现 | 同步记录列表（见 §7.16） |
-| `GET` | `/api/admin/sensevoice-syncs/{sync_id}` | 已实现 | 同步详情（含转写全文与情绪报告，读取留痕；见 §7.17） |
 | `GET` | `/api/admin/subjects/{subject_id}/trends` | 已实现 | 对象心理状态趋势（任意日期区间、多维聚合；见 §7.18） |
 
 ## 6. 序列化脱敏规则
@@ -199,7 +193,6 @@ Authorization: Bearer <token>
 | 所有用户端接口 | `consent_json` 之外的其他对象字段 | 仅返回必要信息 |
 | `GET /api/admin/tickets/{id}` | 无 | 但需写 `audit_logs(sensitive.view)` |
 | `GET /api/admin/sessions/{id}/transcript` | 无 | 必须写留痕 |
-| `GET /api/admin/sensevoice-syncs/{id}` | 无 | 含转写原文，必须写留痕 |
 | `GET /api/admin/subjects/{id}/trends` | 转写原文、`transcript_path`、`audio_path`、影像、`face_path` | 仅返回聚合指标，不含个体敏感原文 |
 | `/api/user/ai-assist/*` | 用户消息原话、AI 回复原文、上游响应体、`DEEPSEEK_API_KEY` | 对话不落库、不写日志；`audit_logs.detail_json` 仅记录模型、轮次、状态等元数据 |
 | 全局日志 | 音频内容、转写原文、面部图 base64、`audio_path` 绝对路径 | 红线 |
@@ -830,135 +823,15 @@ curl "http://localhost:8000/api/admin/tickets?status=pending&priority=P0&subject
 - 同一 `(subject_id, window_end)` 已存在复盘时直接返回该复盘（幂等），不重复生成任务；
 - 成功写 `audit_logs(action=review.create, target_type=review, target_id={review_id})`。
 
-### 7.15 `POST /api/admin/subjects/{subject_id}/sensevoice-sync`
+### 7.15–7.17 思想汇报同步（已下线）
 
-触发一次「思想汇报音频 → SenseVoice 转写 → 情绪分析 → 落库」同步。需 `staff`。
+「思想汇报同步」模块已于 2026-11-26 整体废弃，以下三个端点不再提供，调用返回 `1004 not_found`：
 
-请求体（可省略或传空对象）：
+- `POST /api/admin/subjects/{subject_id}/sensevoice-sync`
+- `GET /api/admin/subjects/{subject_id}/sensevoice-syncs`
+- `GET /api/admin/sensevoice-syncs/{sync_id}`
 
-```json
-{ "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f" }
-```
-
-- `session_id` 可选；缺省取该对象最近一次可用汇报会话（`kind='report'` 且 `status='captured'` 且 `audio_path IS NOT NULL`，按 `captured_at` 倒序）；
-- 成功返回 `data` 为同步摘要（字段同 §7.16 列表项）；
-- 单事务：选会话 → 调 ASR → 调情绪 → 写 `sensevoice_syncs` → 写 `audit_logs`；任一步失败整体回滚，不留同步记录；
-- 同一会话允许重复同步，每次生成新的 `data_version`，不覆盖历史记录。
-
-错误：
-
-| 情况 | code | message |
-|---|---|---|
-| 对象不存在 / 指定的 `session_id` 不属于该对象 | 1004 | `not_found` |
-| `SENSEVOICE_SYNC_ENABLED` 未开启（默认关闭） | 5001 | `sensevoice_sync_disabled` |
-| `SENSEVOICE_API_URL` / `SENSEVOICE_API_KEY` 缺失或服务不可达 | 5001 | `sensevoice_unavailable` |
-| 指定会话非 `report` / 非 `captured` / 无音频；或缺省时无可用汇报会话 | 1005 | `no_report_audio` |
-| 转写失败 | 2004 | `transcription_failed` |
-| 情绪分析失败 | 2004 | `emotion_failed` |
-
-- 开关关闭、无可用会话时**不落库、不写审计**；
-- 成功写一条 `audit_logs(action=sensevoice.sync, target_type=sensevoice_sync, target_id={sync_id})`，`detail_json` 仅含 `session_id`、`data_version`、`operator`，**不含转写原文**；
-- 成功响应示例（`degraded` 固定为 `[]`）：
-
-```json
-{
-  "code": 0,
-  "message": "ok",
-  "data": {
-    "sync_id": "c1a2b3c4-d5e6-4f70-8a9b-0c1d2e3f4a5b",
-    "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
-    "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
-    "status": "succeeded",
-    "provider": "sensevoice",
-    "emotion_primary": "焦虑",
-    "emotion_confidence": 0.87,
-    "data_version": "sensevoice@1.0+20261125T101203",
-    "operator": "staff",
-    "created_at": "2026-11-25T10:12:05+08:00"
-  },
-  "degraded": [],
-  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
-}
-```
-
-### 7.16 `GET /api/admin/subjects/{subject_id}/sensevoice-syncs`
-
-同步记录列表，按 `created_at` 倒序。需 `staff`。
-
-query：`page`（默认 1）、`page_size`（默认 20，最大 100）。对象不存在 → `1004`。
-
-```json
-{
-  "code": 0,
-  "message": "ok",
-  "data": {
-    "items": [
-      {
-        "sync_id": "c1a2b3c4-d5e6-4f70-8a9b-0c1d2e3f4a5b",
-        "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
-        "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
-        "status": "succeeded",
-        "provider": "sensevoice",
-        "emotion_primary": "焦虑",
-        "emotion_confidence": 0.87,
-        "data_version": "sensevoice@1.0+20261125T101203",
-        "operator": "staff",
-        "created_at": "2026-11-25T10:12:05+08:00"
-      }
-    ],
-    "page": 1,
-    "page_size": 20,
-    "total": 1
-  },
-  "degraded": [],
-  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
-}
-```
-
-- 列表**不返回**转写原文与情绪片段（敏感内容走 §7.17 详情并留痕）。
-
-### 7.17 `GET /api/admin/sensevoice-syncs/{sync_id}`
-
-同步详情，含转写全文与情绪报告。需 `staff`。不存在 → `1004`。
-
-```json
-{
-  "code": 0,
-  "message": "ok",
-  "data": {
-    "sync_id": "c1a2b3c4-d5e6-4f70-8a9b-0c1d2e3f4a5b",
-    "subject_id": "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c",
-    "session_id": "8f3c1b2e-4a5d-4c6e-9f10-1a2b3c4d5e6f",
-    "status": "succeeded",
-    "provider": "sensevoice",
-    "transcript_text": "最近工作压力比较大，晚上总是睡不好……",
-    "transcript_language": "zh",
-    "emotion": {
-      "schema_version": "emotion@1.0",
-      "primary": "焦虑",
-      "confidence": 0.87,
-      "scores": { "焦虑": 0.87, "平静": 0.13 },
-      "triggers": [
-        {
-          "text": "最近总是睡不好，心里很慌",
-          "label": "焦虑",
-          "start_sec": 3.2,
-          "end_sec": 5.1
-        }
-      ]
-    },
-    "data_version": "sensevoice@1.0+20261125T101203",
-    "operator": "staff",
-    "created_at": "2026-11-25T10:12:05+08:00",
-    "updated_at": "2026-11-25T10:12:05+08:00"
-  },
-  "degraded": [],
-  "request_id": "6f1c2d3e-4a5b-4c7d-8e9f-0a1b2c3d4e5f"
-}
-```
-
-- 返回数据前写一条 `audit_logs(action=sensitive.view, target_type=sensevoice_sync, target_id={sync_id}, detail_json={"field":"transcript"})`；留痕失败 → `5000 audit_write_failed`，不返回数据；
-- `emotion` 为 `emotion_json` 解析后的对象（结构见 db@1.5 §7.1）。
+业务码 `2004` 停用；`audit_logs` 历史 `sensevoice.sync` 记录保留可读。会话 AI 分析结果统一由 §7.21 媒体端点按会话返回。
 
 ### 7.18 `GET /api/admin/subjects/{subject_id}/trends`
 
@@ -1221,7 +1094,23 @@ curl "http://localhost:8000/api/admin/subjects/3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2
       "image_url": "/api/admin/sessions/9f1c6d0e-3a4b-4c5d-8e9f-0a1b2c3d4e5f/face",
       "audio_url": null,
       "transcript_text": null,
-      "emotion": null
+      "emotion": null,
+      "analysis": {
+        "face": {
+          "status": "ok",
+          "model_version": "mock-face@1.0",
+          "expression_label": "neutral",
+          "intensity": 0.22,
+          "face_confidence": 0.71,
+          "frame_count": 3,
+          "valid_frames": 3
+        },
+        "emotion": null,
+        "psych": null
+      },
+      "rules_fired": [],
+      "evidence": [],
+      "review_color": null
     },
     {
       "session_id": "6d93a7a3-e05a-40e4-9ebc-1db9bc51e529",
@@ -1239,7 +1128,45 @@ curl "http://localhost:8000/api/admin/subjects/3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2
         "valence": 0.6,
         "arousal": 0.6,
         "label": "neutral"
-      }
+      },
+      "analysis": {
+        "face": {
+          "status": "ok",
+          "model_version": "mock-face@1.0",
+          "expression_label": "neutral",
+          "intensity": 0.22,
+          "face_confidence": 0.71,
+          "frame_count": 3,
+          "valid_frames": 3
+        },
+        "emotion": {
+          "status": "ok",
+          "model_version": "sensevoice-emotion@1.0",
+          "valence": 0.6,
+          "arousal": 0.6,
+          "label": "neutral"
+        },
+        "psych": {
+          "status": "ok",
+          "model_version": "mock-psych@1.0",
+          "signal_strength": 41.2,
+          "intent_flag": "none",
+          "keywords": ["累", "睡不着"],
+          "rationale_signal": "出现疲劳与睡眠相关表达，未出现指向性意图"
+        }
+      },
+      "rules_fired": ["R_SINGLE_ORANGE"],
+      "evidence": [
+        {
+          "rule_id": "R_SINGLE_ORANGE",
+          "field_path": "channels.psych.output.signal_strength",
+          "observed_value": 41.2,
+          "threshold_key": "SINGLE_ORANGE_SIGNAL_MIN",
+          "threshold_value": 40,
+          "session_id": "6d93a7a3-e05a-40e4-9ebc-1db9bc51e529"
+        }
+      ],
+      "review_color": "orange"
     }
   ]
 }
@@ -1254,6 +1181,9 @@ curl "http://localhost:8000/api/admin/subjects/3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2
 5. 两个 `*_url` 均为**相对路径**，客户端必须带 `Authorization` 头以 blob 方式加载（不可直接放进 `<img>` / `<audio>` 的 `src`）。
 6. 当日本次响应含任意非空 `transcript_text` 时写**一条**汇总 `audit_logs`：`action="sensitive.view"`、`target_type="subject"`、`target_id=subject_id`、`detail_json={"field":"transcript","date":"YYYY-MM-DD","count":N}`。
 7. `emotion` 取自该会话 `analysis_json.channels.emotion`，与录音一一对应；未分析、无该通道或结构异常时为 `null`。`label` 取值 `neutral / negative / strong_negative`，前端应结合 `valence` 表达倾向，不得仅凭 `label=neutral` 判定为"中性"。
+8. `analysis` 固定包含 `face` / `emotion` / `psych` 三键，取自同一会话 `analysis_json.channels`：`face` 返回 `expression_label`、`intensity`、`face_confidence`、`frame_count`、`valid_frames`；`emotion` 返回 `valence`、`arousal`、`label`；`psych` 返回 `signal_strength`、`intent_flag`、`keywords`、`rationale_signal`。对应通道无 `output` 或结构异常时为 `null`。
+9. `rules_fired` / `evidence` / `review_color` 取自该对象**最新一条包含该会话证据**的复盘：`evidence` 仅含 `evidence_json` 中 `session_id` 等于本条记录的条目；`rules_fired` 为这些条目的去重 `rule_id`；`review_color` 为该复盘 `final_color`。无匹配复盘时分别为 `[]` / `[]` / `null`。
+10. 同一请求内一次性加载该对象复盘并建立 `session_id → 复盘` 索引，逐条记录不得重复查库；`analysis` 与 `evidence` 均为只读透出，不写库、不新增留痕字段。
 
 **错误**
 
@@ -1316,3 +1246,4 @@ mock 数据必须与本节示例字段完全一致，不得增删字段。
 | 1.5（实现补记·六） | 2026-11-25 | 新增 AI 援助 `GET /api/user/ai-assist/status`、`POST /api/user/ai-assist/chat`（§7.19–7.20）：DeepSeek `deepseek-flash` + `thinking.type=disabled` + `tools:[{"type":"deepseek_web_search"}]`，不设 `tool_choice`；SSE 流式；无 Key 返回中性提示不报 500；不支持工具时自动降级并提示「本次回答未启用联网搜索」；对话不落业务表，仅写 `audit_logs(ai_assist.chat)` 元数据 |
 | 1.5（实现补记·七） | 2026-11-25 | 新增管理端媒体读取：`GET /api/admin/subjects/{subject_id}/media`（§7.21，按日返回打卡影像 URL、汇报音频 URL 与转写文本，缺失字段为 `null`）与 `GET /api/admin/sessions/{session_id}/audio`（§7.22，`audio/wav` + Range）；URL 一律相对路径、客户端带鉴权以 blob 加载；读取转写写 `sensitive.view` |
 | 1.5（实现补记·八） | 2026-11-25 | §7.21 响应由单条 `item` 改为 `items[]`：返回当日全部 `captured` 会话并按 `captured_at` 升序，前端默认选中最后一条（当日最新），支持「上一条 / 下一条」；转写审计改为单条汇总并带 `count` |
+| 1.5（实现补记·九） | 2026-11-26 | 下线思想汇报同步：删除 §7.15–§7.17 三个端点与 `sensevoice_syncs` 表，`2004` 停用；§7.21 每条记录新增 `analysis`（`face` / `emotion` / `psych`）、`rules_fired`、`evidence`、`review_color`，按会话展示 AI 分析结果与五色证据；`emotion` 字段保留兼容 |

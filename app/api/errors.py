@@ -33,11 +33,9 @@ STATE_CONFLICT = 1005
 RATE_LIMITED = 1006
 CAPTURE_FAILED = 2001
 ANALYSIS_FAILED = 2003
-#: 思想汇报同步失败（结果不可用）：transcription_failed / emotion_failed。
-SYNC_FAILED = 2004
 SESSION_NOT_CAPTURED = 4000
 INTERNAL_ERROR = 5000
-#: 外部 AI 能力不可用：同步开关未启用或 SenseVoice 未配置/不可达。
+#: 外部 AI 能力不可用：AI 援助未启用或上游不可达。
 AI_UNAVAILABLE = 5001
 
 

@@ -1,7 +1,6 @@
 """ORM 模型。
 
-字段、约束与索引与 `docs/contracts/db.md`（db@1.5）第 2-8 节逐字对齐
-（§7 `sensevoice_syncs` 为 2026-11-25 新增）：
+字段、约束与索引与 `docs/contracts/db.md`（db@1.5）第 2-6 节逐字对齐：
 业务主键为 TEXT（UUID v4 字符串），时间为 TEXT（ISO 8601 字符串），
 布尔为 INTEGER 0/1，JSON 列为 TEXT + `json_valid` CHECK，可空列允许 NULL。
 
@@ -329,66 +328,4 @@ class AuditLog(Base):
             desc("created_at"),
         ),
         {"sqlite_autoincrement": True},
-    )
-
-
-class SensevoiceSync(Base):
-    """思想汇报同步记录（db.md §7，db@1.5 新增）。
-
-    一次「汇报音频 → SenseVoice 转写 → 情绪分析」的同步产物；同一会话可重复
-    同步并生成新版本行，不覆盖历史。`transcript_text` 与 `emotion_json` 为敏感
-    内容，读取须由 api 层写 `sensitive.view` 留痕。
-    """
-
-    __tablename__ = "sensevoice_syncs"
-
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
-    subject_id: Mapped[str] = mapped_column(
-        Text, ForeignKey("subjects.id"), nullable=False
-    )
-    session_id: Mapped[str] = mapped_column(
-        Text, ForeignKey("sessions.id"), nullable=False
-    )
-    # 原子语义下失败整体回滚、不落 failed 行；failed 为异步重试预留。
-    status: Mapped[str] = mapped_column(
-        Text, nullable=False, default="succeeded", server_default="succeeded"
-    )
-    provider: Mapped[str] = mapped_column(
-        Text, nullable=False, default="sensevoice", server_default="sensevoice"
-    )
-    transcript_text: Mapped[str] = mapped_column(Text, nullable=False)
-    transcript_language: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    emotion_json: Mapped[str] = mapped_column(Text, nullable=False)
-    emotion_primary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    emotion_confidence: Mapped[Optional[float]] = mapped_column(REAL, nullable=True)
-    data_version: Mapped[str] = mapped_column(Text, nullable=False)
-    operator: Mapped[str] = mapped_column(
-        Text, nullable=False, default="staff", server_default="staff"
-    )
-    # 失败码 / 失败说明为后续异步重试预留；不得写入敏感内容与转写原文。
-    error_code: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[str] = mapped_column(Text, nullable=False)
-    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
-
-    __table_args__ = (
-        CheckConstraint(
-            "status IN ('succeeded','failed')",
-            name="ck_sensevoice_syncs_status",
-        ),
-        CheckConstraint(
-            "json_valid(emotion_json)",
-            name="ck_sensevoice_syncs_emotion_json",
-        ),
-        CheckConstraint(
-            "emotion_confidence IS NULL "
-            "OR (emotion_confidence >= 0 AND emotion_confidence <= 1)",
-            name="ck_sensevoice_syncs_emotion_confidence",
-        ),
-        Index(
-            "ix_sensevoice_syncs_subject_created_at",
-            "subject_id",
-            desc("created_at"),
-        ),
-        Index("ix_sensevoice_syncs_session_id", "session_id"),
     )

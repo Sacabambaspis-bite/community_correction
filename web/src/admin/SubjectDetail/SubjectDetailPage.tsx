@@ -1,7 +1,6 @@
 /* 对象详情页（ui@1.3 §4.2）：基础信息、状态概览、打卡与思想汇报（含全部采集记录折叠区）、
- * 双模块频率、当前结果。原独立「会话时间线」「敏感内容」栏目已分别并入与移除。
+ * 双模块频率。原独立「会话时间线」「敏感内容」「记录检索」「当前结果」栏目均已移除。
  * 独立状态看板（ui@1.2 §4.3）已合并到本页，不再提供单独路由。
- * 当前复盘列表仍无查询端点，因此当前结果保留占位，不编造色码。
  */
 import {
   useCallback,
@@ -41,9 +40,10 @@ import {
 } from "../../components/common/StateViews";
 import { COLOR_META, COLOR_ORDER } from "../../lib/colors";
 import { errorText } from "../../lib/errorMessages";
+import { ruleListText } from "../../lib/ruleText";
 import { ApiError, fetchMediaBlob } from "../../lib/http";
 import { SessionTimeline } from "./SessionTimeline";
-import { SensevoiceSyncPanel } from "./SensevoiceSyncPanel";
+import { EvidenceTable } from "../Tickets/EvidenceTable";
 import { TrendStrip } from "./TrendStrip";
 import { TrendBoard } from "./TrendBoard/TrendBoard";
 import styles from "./SubjectDetail.module.css";
@@ -627,7 +627,7 @@ export default function SubjectDetailPage() {
     <section>
       <PageTitle
         title="对象详情"
-        description="基础信息、状态概览、打卡与思想汇报（含全部采集记录）、频率配置、当前结果与心理状态趋势。"
+        description="基础信息、状态概览、打卡与思想汇报（含全部采集记录）、频率配置与心理状态趋势。"
         extra={<Link to="/admin/subjects">返回对象列表</Link>}
       />
 
@@ -963,27 +963,8 @@ export default function SubjectDetailPage() {
                         ) : (
                           <p className={styles.mediaEmpty}>暂无转写文本</p>
                         )}
-                        <p className={styles.mediaLine}>情绪识别：</p>
-                        {reportRecord.emotion ? (
-                          <p className={styles.emotionText}>
-                            {emotionTone(reportRecord.emotion)}
-                            {reportRecord.emotion.valence !== null
-                              ? `（valence ${reportRecord.emotion.valence.toFixed(2)} / arousal ${
-                                  reportRecord.emotion.arousal !== null
-                                    ? reportRecord.emotion.arousal.toFixed(2)
-                                    : "—"
-                                }）`
-                              : ""}
-                            {reportRecord.emotion.status === "degraded"
-                              ? " · 降级结果，仅供参考"
-                              : ""}
-                            {reportRecord.emotion.model_version
-                              ? ` · ${reportRecord.emotion.model_version}`
-                              : ""}
-                          </p>
-                        ) : (
-                          <p className={styles.mediaEmpty}>暂无情绪识别结果</p>
-                        )}
+
+                        <AnalysisPanel record={reportRecord} />
                       </SensitivePanel>
                     ) : (
                       <p className={styles.mediaEmpty}>该条记录无录音</p>
@@ -1102,47 +1083,6 @@ export default function SubjectDetailPage() {
           <p className={styles.notice}>对象信息加载成功后可配置频率。</p>
         )}
       </section>
-
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>当前结果</h2>
-        <p className={styles.notice}>
-          复盘结果接口未实现（接口契约 5.4 节），暂不展示色码与证据链，避免展示无来源的结论。
-        </p>
-      </section>
-
-      {subject ? <SensevoiceSyncPanel subjectId={subject.subject_id} /> : null}
-
-      <section className={styles.section}>
-        <h2 className={styles.sectionTitle}>记录检索</h2>
-        <p className={styles.notice}>
-          契约尚未提供时间范围与色码过滤参数（接口契约 7.7 节仅支持对象编号 / 状态 /
-          分页），以下控件为占位，暂不可用。
-        </p>
-        <fieldset className={styles.filterBox} disabled>
-          <label className={styles.filterField}>
-            <span className={styles.filterLabel}>开始日期</span>
-            <input className={styles.input} type="date" />
-          </label>
-          <label className={styles.filterField}>
-            <span className={styles.filterLabel}>结束日期</span>
-            <input className={styles.input} type="date" />
-          </label>
-          <label className={styles.filterField}>
-            <span className={styles.filterLabel}>色码</span>
-            <select className={styles.select} defaultValue="">
-              <option value="">全部</option>
-              {COLOR_ORDER.map((color) => (
-                <option key={color} value={color}>
-                  {COLOR_META[color].label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button className={styles.button} type="button" disabled>
-            检索
-          </button>
-        </fieldset>
-      </section>
     </section>
   );
 }
@@ -1150,6 +1090,156 @@ export default function SubjectDetailPage() {
 /** mock 直接返回 data URI，真实后端返回需要鉴权的相对路径。 */
 function isInlineUrl(url: string): boolean {
   return url.startsWith("data:") || url.startsWith("blob:");
+}
+
+const EXPRESSION_TEXT: Record<string, string> = {
+  neutral: "中性",
+  sad: "低落",
+  anxious: "焦虑",
+  angry: "愤怒",
+  positive: "积极",
+};
+
+const INTENT_TEXT: Record<string, string> = {
+  none: "无明确意图",
+  self_harm_mention: "提及自我伤害",
+  suicide_intent: "明确意图标记",
+};
+
+/** 数值统一保留两位；缺失显示「—」。 */
+function scoreText(value: number | null, digits = 2): string {
+  return value === null || value === undefined ? "—" : value.toFixed(digits);
+}
+
+/** 非 ok 通道追加中性提示，避免把降级/跳过结果当成完整结论。 */
+function channelNotice(status: string | null): string {
+  if (!status || status === "ok") {
+    return "";
+  }
+  return status === "degraded" ? "（降级结果，仅供参考）" : "（本次不可用）";
+}
+
+/** 思想汇报展开区：人脸、语音情感、心理文本与五色证据同屏展示。 */
+function AnalysisPanel({ record }: { record: DailyMediaRecord }) {
+  const { analysis } = record;
+  const emotion = analysis.emotion ?? record.emotion;
+  const face = analysis.face;
+  const psych = analysis.psych;
+
+  return (
+    <div className={styles.analysisBlock}>
+      <p className={styles.mediaLine}>AI 分析结果：</p>
+      <div className={styles.analysisGrid}>
+        <div className={styles.analysisCard}>
+          <h4 className={styles.analysisTitle}>人脸表情</h4>
+          {face ? (
+            <>
+              <p className={styles.analysisLine}>
+                表情：
+                {face.expression_label
+                  ? EXPRESSION_TEXT[face.expression_label] ?? "其他"
+                  : "—"}
+                {channelNotice(face.status)}
+              </p>
+              <p className={styles.analysisLine}>
+                表情强度：{scoreText(face.intensity)}
+              </p>
+              <p className={styles.analysisLine}>
+                识别置信度：{scoreText(face.face_confidence)} · 有效帧{" "}
+                {face.valid_frames ?? "—"} / {face.frame_count ?? "—"}
+              </p>
+            </>
+          ) : (
+            <p className={styles.mediaEmpty}>本次无人脸表情结果</p>
+          )}
+        </div>
+
+        <div className={styles.analysisCard}>
+          <h4 className={styles.analysisTitle}>语音情感</h4>
+          {emotion ? (
+            <>
+              <p className={styles.analysisLine}>
+                倾向：{emotionTone(emotion)}
+                {channelNotice(emotion.status)}
+              </p>
+              <p className={styles.analysisLine}>
+                效价 {scoreText(emotion.valence)} / 唤醒{" "}
+                {scoreText(emotion.arousal)}
+              </p>
+              <p className={styles.analysisLine}>
+                情绪标签：{emotion.label ?? "—"}
+              </p>
+            </>
+          ) : (
+            <p className={styles.mediaEmpty}>本次无语音情感结果</p>
+          )}
+        </div>
+
+        <div className={styles.analysisCard}>
+          <h4 className={styles.analysisTitle}>心理文本评估</h4>
+          {psych ? (
+            <>
+              <p className={styles.analysisLine}>
+                信号强度：{scoreText(psych.signal_strength, 1)} / 100
+                {channelNotice(psych.status)}
+              </p>
+              <p className={styles.analysisLine}>
+                意图标记：
+                {psych.intent_flag
+                  ? INTENT_TEXT[psych.intent_flag] ?? "其他"
+                  : "—"}
+              </p>
+              <p className={styles.analysisLine}>
+                触发关键词：
+                {psych.keywords.length > 0
+                  ? psych.keywords.join("、")
+                  : "—"}
+              </p>
+              <p className={styles.analysisLine}>
+                分析依据：{psych.rationale_signal ?? "未提供"}
+              </p>
+            </>
+          ) : (
+            <p className={styles.mediaEmpty}>本次无心理文本结果</p>
+          )}
+        </div>
+      </div>
+
+      <div className={styles.analysisRules}>
+        <p className={styles.mediaLine}>五色规则与证据：</p>
+        {record.rules_fired.length > 0 ? (
+          <>
+            <p className={styles.ruleLine}>
+              {record.review_color ? (
+                <span
+                  className={styles.swatch}
+                  style={{
+                    background: `var(${COLOR_META[record.review_color].token})`,
+                  }}
+                  aria-hidden="true"
+                />
+              ) : null}
+              <span className={styles.ruleColor}>
+                {record.review_color
+                  ? COLOR_META[record.review_color].label
+                  : "未定色"}
+              </span>
+              <span>{ruleListText(record.rules_fired)}</span>
+            </p>
+            <EvidenceTable rows={record.evidence} />
+          </>
+        ) : (
+          <p className={styles.mediaEmpty}>
+            该会话未命中五色规则，或尚无复盘结果。
+          </p>
+        )}
+      </div>
+
+      <p className={styles.analysisFootnote}>
+        以上为采集分析结果，仅作提示，需结合面谈与人工复核。
+      </p>
+    </div>
+  );
 }
 
 /** 按 valence 给出可读倾向；`label=neutral` 仍可能偏正向，不能只看 label。 */

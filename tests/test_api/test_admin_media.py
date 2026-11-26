@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import select
 
 import app.api.routers.admin as admin_router
-from app.db.models import AuditLog, CaptureSession, Subject
+from app.db.models import AuditLog, CaptureSession, Review, Subject
 
 _SUBJECT_ID = "3b1e7c90-2f4a-4d51-8c6b-7d9e0f1a2b3c"
 _AUDIO_BYTES = b"RIFF\x00\x00\x00\x00WAVEfmt "
@@ -389,3 +389,220 @@ def test_audio_without_audio_path_returns_not_found(
     body = client.get(f"/api/admin/sessions/{session_id}/audio", headers=admin_headers).json()
 
     assert body["code"] == 1004
+
+
+def test_media_returns_three_channel_analysis(
+    client, db_factory, admin_headers, tmp_path, monkeypatch
+):
+    """analysis 固定三键：face / emotion / psych，缺通道为 None。"""
+    monkeypatch.setattr(admin_router, "STORAGE_ROOT", str(tmp_path))
+    _add_subject(db_factory)
+    checkin_id = "c0000000-0000-4000-8000-000000000030"
+    report_id = "r0000000-0000-4000-8000-000000000031"
+    _add_session(
+        db_factory,
+        checkin_id,
+        kind="checkin",
+        captured_at=_local(2026, 11, 25, 8, 0),
+        face_path=f"subjects/{_SUBJECT_ID}/sessions/{checkin_id}/face.jpg",
+        analysis_json=json.dumps(
+            {
+                "channels": {
+                    "face": {
+                        "status": "ok",
+                        "model_version": "mock-face@1.0",
+                        "output": {
+                            "expression_label": "neutral",
+                            "intensity": 0.22,
+                            "face_confidence": 0.71,
+                            "frame_count": 3,
+                            "valid_frames": 3,
+                        },
+                    }
+                }
+            }
+        ),
+    )
+    _add_session(
+        db_factory,
+        report_id,
+        captured_at=_local(2026, 11, 25, 9, 0),
+        analysis_json=json.dumps(
+            {
+                "channels": {
+                    "emotion": {
+                        "status": "ok",
+                        "model_version": "sensevoice-emotion@1.0",
+                        "output": {"valence": 0.6, "arousal": 0.6, "label": "neutral"},
+                    },
+                    "psych": {
+                        "status": "ok",
+                        "model_version": "mock-psych@1.0",
+                        "output": {
+                            "signal_strength": 41.2,
+                            "intent_flag": "none",
+                            "keywords": ["累", "睡不着"],
+                            "rationale_signal": "出现疲劳与睡眠相关表达",
+                        },
+                    },
+                }
+            }
+        ),
+        **_write_media(tmp_path, report_id, transcript="三路分析校验"),
+    )
+
+    body = client.get(
+        f"/api/admin/subjects/{_SUBJECT_ID}/media",
+        params={"date": "2026-11-25"},
+        headers=admin_headers,
+    ).json()
+
+    items = body["data"]["items"]
+    checkin, report = items
+    assert checkin["analysis"]["face"]["expression_label"] == "neutral"
+    assert checkin["analysis"]["emotion"] is None
+    assert checkin["analysis"]["psych"] is None
+    assert report["analysis"]["face"] is None
+    assert report["analysis"]["emotion"]["label"] == "neutral"
+    assert report["analysis"]["psych"]["signal_strength"] == 41.2
+    assert report["analysis"]["psych"]["keywords"] == ["累", "睡不着"]
+    # 顶层 emotion 保留兼容，与 analysis.emotion 一致。
+    assert report["emotion"] == report["analysis"]["emotion"]
+
+
+def test_media_rules_and_evidence_follow_latest_review(
+    client, db_factory, admin_headers, tmp_path, monkeypatch
+):
+    """规则/证据只取该会话条目，且使用最新一条包含它的复盘。"""
+    monkeypatch.setattr(admin_router, "STORAGE_ROOT", str(tmp_path))
+    _add_subject(db_factory)
+    first, second = (
+        "r0000000-0000-4000-8000-000000000040",
+        "r0000000-0000-4000-8000-000000000041",
+    )
+    _add_session(db_factory, first, captured_at=_local(2026, 11, 25, 9, 0), **_write_media(tmp_path, first))
+    _add_session(db_factory, second, captured_at=_local(2026, 11, 25, 10, 0), **_write_media(tmp_path, second))
+
+    def evidence(rule_id: str, session_id: str | None, value: float) -> dict:
+        row = {
+            "rule_id": rule_id,
+            "rule_version": "1.0",
+            "field_path": "channels.psych.output.signal_strength",
+            "observed_value": value,
+            "threshold_key": "SINGLE_ORANGE_SIGNAL_MIN",
+            "threshold_value": 40,
+            "triggered_at": "2026-11-25T23:00:00+08:00",
+        }
+        if session_id is not None:
+            row["session_id"] = session_id
+        return row
+
+    with db_factory() as db:
+        db.add(
+            Review(
+                id="old-review",
+                subject_id=_SUBJECT_ID,
+                source_session_id=first,
+                window_start="2026-11-19",
+                window_end="2026-11-25",
+                window_days=7,
+                single_session_risk="none",
+                trend_color="blue",
+                final_color="blue",
+                consistency="high",
+                manual_review=0,
+                rules_fired=json.dumps(["R_TREND_BLUE"]),
+                evidence_json=json.dumps([evidence("R_TREND_BLUE", first, 10)]),
+                grading_version="1.0",
+                created_at=_iso(_local(2026, 11, 25, 23, 0)),
+            )
+        )
+        db.add(
+            Review(
+                id="new-review",
+                subject_id=_SUBJECT_ID,
+                source_session_id=second,
+                window_start="2026-11-19",
+                window_end="2026-11-26",
+                window_days=7,
+                single_session_risk="orange",
+                trend_color="yellow",
+                final_color="orange",
+                consistency="medium",
+                manual_review=0,
+                rules_fired=json.dumps(["R_SINGLE_ORANGE", "R_CONSISTENCY_CAP"]),
+                evidence_json=json.dumps(
+                    [
+                        evidence("R_SINGLE_ORANGE", first, 41.2),
+                        evidence("R_SINGLE_ORANGE", first, 0.55),
+                        evidence("R_SINGLE_ORANGE", second, 48.0),
+                        evidence("R_CONSISTENCY_CAP", None, 0.5),
+                    ]
+                ),
+                grading_version="1.0",
+                created_at=_iso(_local(2026, 11, 25, 23, 30)),
+            )
+        )
+        db.commit()
+
+    body = client.get(
+        f"/api/admin/subjects/{_SUBJECT_ID}/media",
+        params={"date": "2026-11-25"},
+        headers=admin_headers,
+    ).json()
+
+    items = body["data"]["items"]
+    assert [entry["session_id"] for entry in items] == [first, second]
+    first_item, second_item = items
+    assert first_item["review_color"] == "orange"
+    assert first_item["rules_fired"] == ["R_SINGLE_ORANGE"]
+    assert len(first_item["evidence"]) == 2
+    assert {row["session_id"] for row in first_item["evidence"]} == {first}
+    assert second_item["rules_fired"] == ["R_SINGLE_ORANGE"]
+    assert second_item["evidence"][0]["session_id"] == second
+
+
+def test_media_without_review_returns_empty_rules(
+    client, db_factory, admin_headers, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(admin_router, "STORAGE_ROOT", str(tmp_path))
+    _add_subject(db_factory)
+    session_id = "r0000000-0000-4000-8000-000000000050"
+    _add_session(db_factory, session_id, captured_at=_local(2026, 11, 25, 9, 0), **_write_media(tmp_path, session_id))
+
+    body = client.get(
+        f"/api/admin/subjects/{_SUBJECT_ID}/media",
+        params={"date": "2026-11-25"},
+        headers=admin_headers,
+    ).json()
+
+    item = body["data"]["items"][0]
+    assert item["analysis"] == {"face": None, "emotion": None, "psych": None}
+    assert item["rules_fired"] == []
+    assert item["evidence"] == []
+    assert item["review_color"] is None
+
+
+def test_removed_sensevoice_sync_endpoints_return_not_found(
+    client, db_factory, admin_headers
+):
+    """思想汇报同步模块已下线，旧端点不再挂载。"""
+    _add_subject(db_factory)
+
+    responses = [
+        client.post(
+            f"/api/admin/subjects/{_SUBJECT_ID}/sensevoice-sync",
+            headers=admin_headers,
+        ),
+        client.get(
+            f"/api/admin/subjects/{_SUBJECT_ID}/sensevoice-syncs",
+            headers=admin_headers,
+        ),
+        client.get(
+            "/api/admin/sensevoice-syncs/00000000-0000-4000-8000-000000000000",
+            headers=admin_headers,
+        ),
+    ]
+    # 未挂载路由按统一信封返回 HTTP 200 + code=1004（api.md §2）。
+    assert [response.status_code for response in responses] == [200, 200, 200]
+    assert [response.json()["code"] for response in responses] == [1004, 1004, 1004]

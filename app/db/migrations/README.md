@@ -1,7 +1,16 @@
 # 数据库迁移约定
 
-本目录当前为空，本轮只提供 `Base.metadata.create_all()` 建库（`python -m app.db.init`），
-未引入 Alembic 运行时。后续 schema 变化按以下规则补充迁移文件。
+本轮仍只提供 `Base.metadata.create_all()` 建库（`python -m app.db.init`），
+未引入 Alembic 运行时；存量库的 schema 变化以本目录下的手工迁移脚本补齐。
+
+现有迁移：
+
+| 文件 | 作用 |
+|---|---|
+| `202611241200_add_dual_module_tasks.py` | 补签到/汇报双模块字段、逾期工单支撑列与索引 |
+| `202611261200_drop_sensevoice_syncs.py` | 删除已下线的 `sensevoice_syncs` 表（可重复执行） |
+
+后续 schema 变化按以下规则补充迁移文件。
 
 ## 规则
 

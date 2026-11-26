@@ -13,7 +13,6 @@ from app.db.models import (
     CaptureSession,
     Review,
     ReviewTicket,
-    SensevoiceSync,
     Subject,
 )
 
@@ -25,7 +24,6 @@ __all__ = [
     "Review",
     "ReviewTicket",
     "SUGGESTED_METHODS",
-    "SensevoiceSync",
     "SessionLocal",
     "Subject",
     "engine",
